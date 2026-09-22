@@ -19,8 +19,6 @@ public class AppUser {
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
 
-    private UUID merchantId;
-
     @Column(unique = true, nullable = false)
     private String email;
 

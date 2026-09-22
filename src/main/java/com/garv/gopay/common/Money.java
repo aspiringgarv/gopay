@@ -18,11 +18,6 @@ public class Money {
     @Column(name = "currency", nullable = false)
     private String currency;
 
-    public Money(long amount, String currency) {
-        this.amount = amount;
-        this.currency = currency;
-    }
-
     public static Money of(long amount, String currency) {
         return new Money(amount, currency);
     }
