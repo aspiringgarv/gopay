@@ -3,34 +3,28 @@ package com.garv.gopay.merchant.converters.auth;
 import com.garv.gopay.merchant.dto.request.MerchantSignupRequest;
 import com.garv.gopay.merchant.dto.response.MerchantSignupResponse;
 import com.garv.gopay.merchant.entities.Merchant;
-import org.springframework.stereotype.Component;
+import org.mapstruct.Mapper;
+import org.mapstruct.Mapping;
+import org.mapstruct.MappingConstants;
 
-import java.time.LocalDateTime;
-import java.util.UUID;
+@Mapper(componentModel = MappingConstants.ComponentModel.SPRING)
+public interface MerchantAuthConverter {
 
-@Component
-public class MerchantAuthConverter {
+    @Mapping(target = "buisnessType", source = "businessType")
+    @Mapping(target = "merchantId", expression = "java(java.util.UUID.randomUUID().toString())")
+    @Mapping(target = "id", ignore = true)
+    @Mapping(target = "merchantStatus", ignore = true)
+    @Mapping(target = "contactNumber", ignore = true)
+    @Mapping(target = "gstId", ignore = true)
+    @Mapping(target = "pan", ignore = true)
+    @Mapping(target = "settlementBankAccount", ignore = true)
+    @Mapping(target = "settlementIfsc", ignore = true)
+    @Mapping(target = "settlementAccountHolderName", ignore = true)
+    Merchant toEntity(MerchantSignupRequest request);
 
-    public Merchant toEntity(MerchantSignupRequest request) {
-        return Merchant.builder()
-                .name(request.name())
-                .businessName(request.businessName())
-                .email(request.email())
-                .buisnessType(request.businessType())
-                .merchantId(UUID.randomUUID().toString())
-                .build();
-    }
-
-    public MerchantSignupResponse toPojo(Merchant merchant) {
-        return new MerchantSignupResponse(
-                merchant.getId(),
-                merchant.getName(),
-                merchant.getBusinessName(),
-                merchant.getEmail(),
-                merchant.getBuisnessType(),
-                merchant.getMerchantStatus(),
-                LocalDateTime.now()
-        );
-    }
+    @Mapping(target = "businessType", source = "buisnessType")
+    @Mapping(target = "status", source = "merchantStatus")
+    @Mapping(target = "createdAt", ignore = true)
+    MerchantSignupResponse toPojo(Merchant merchant);
 
 }

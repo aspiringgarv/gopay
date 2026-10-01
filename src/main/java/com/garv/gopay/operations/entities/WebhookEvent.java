@@ -1,5 +1,6 @@
 package com.garv.gopay.operations.entities;
 
+import com.garv.gopay.common.entities.BaseEntity;
 import com.garv.gopay.common.enums.WebhookEventStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -17,7 +18,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class WebhookEvent {
+public class WebhookEvent extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -48,8 +49,6 @@ public class WebhookEvent {
     private LocalDateTime nextRetryAt;
 
     private LocalDateTime lastRetryAt;
-
-    private LocalDateTime createdAt;
 
     private LocalDateTime deliveredAt;
 

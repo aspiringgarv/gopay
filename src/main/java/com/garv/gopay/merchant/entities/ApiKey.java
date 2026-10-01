@@ -1,5 +1,6 @@
 package com.garv.gopay.merchant.entities;
 
+import com.garv.gopay.common.entities.BaseEntity;
 import com.garv.gopay.common.enums.Environment;
 import jakarta.persistence.*;
 import lombok.*;
@@ -8,13 +9,16 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "api_key")
+@Table(name = "api_key", indexes = {
+        @Index(name = "idx_api_key_merchant_id", columnList = "merchant_id"),
+        @Index(name = "idx_api_key_merchant_id_environment_enabled", columnList = "merchant_id, environment, enabled")
+})
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ApiKey {
+public class ApiKey extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -43,8 +47,6 @@ public class ApiKey {
     private boolean enabled;
 
     private LocalDateTime lastUsedAt;
-
-    private LocalDateTime createdAt;
 
     private LocalDateTime rotatedAt;
 

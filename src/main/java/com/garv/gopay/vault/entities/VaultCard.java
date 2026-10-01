@@ -1,9 +1,9 @@
 package com.garv.gopay.vault.entities;
 
+import com.garv.gopay.common.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
@@ -13,7 +13,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class VaultCard {
+public class VaultCard extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -38,9 +38,5 @@ public class VaultCard {
 
     @Column(nullable = false)
     private int expiryYear;
-
-    private LocalDateTime createdAt;
-
-    private LocalDateTime updatedAt;
 
 }

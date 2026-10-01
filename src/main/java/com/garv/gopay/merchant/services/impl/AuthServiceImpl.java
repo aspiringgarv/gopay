@@ -1,5 +1,6 @@
 package com.garv.gopay.merchant.services.impl;
 
+import com.garv.gopay.common.exceptions.DuplicateResourceException;
 import com.garv.gopay.merchant.converters.auth.AppUserAuthConverter;
 import com.garv.gopay.merchant.converters.auth.MerchantAuthConverter;
 import com.garv.gopay.merchant.dto.request.MerchantSignupRequest;
@@ -9,12 +10,11 @@ import com.garv.gopay.merchant.entities.Merchant;
 import com.garv.gopay.merchant.repositories.AppUserRepository;
 import com.garv.gopay.merchant.repositories.MerchantRepository;
 import com.garv.gopay.merchant.services.AuthService;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
 
 @Service
 @RequiredArgsConstructor
@@ -27,9 +27,10 @@ public class AuthServiceImpl implements AuthService {
     private final AppUserAuthConverter appUserConverter;
 
     @Override
+    @Transactional
     public MerchantSignupResponse signup(@NonNull MerchantSignupRequest request) {
         if (appUserRepository.existsByEmail(request.email())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Email is already registered");
+            throw new DuplicateResourceException("MERCHANT_WITH_THIS_EMAIL_ALREADY_EXISTS", "Email is already registered");
         }
 
         Merchant merchant = merchantConverter.toEntity(request);

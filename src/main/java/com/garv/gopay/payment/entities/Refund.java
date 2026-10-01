@@ -1,6 +1,7 @@
 package com.garv.gopay.payment.entities;
 
 import com.garv.gopay.common.Money;
+import com.garv.gopay.common.entities.BaseEntity;
 import com.garv.gopay.common.enums.RefundStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -18,7 +19,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Refund {
+public class Refund extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -52,7 +53,5 @@ public class Refund {
     private Map<String, Object> notes;
 
     private LocalDateTime processedAt;
-
-    private LocalDateTime createdAt;
 
 }

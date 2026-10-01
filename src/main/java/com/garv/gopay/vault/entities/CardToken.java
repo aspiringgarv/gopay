@@ -1,5 +1,6 @@
 package com.garv.gopay.vault.entities;
 
+import com.garv.gopay.common.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -13,7 +14,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class CardToken {
+public class CardToken extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -30,10 +31,6 @@ public class CardToken {
 
     @Column(name = "merchant_id", nullable = false)
     private UUID merchantId;
-
-    private LocalDateTime createdAt;
-
-    private LocalDateTime updatedAt;
 
     private LocalDateTime revokedAt;
 

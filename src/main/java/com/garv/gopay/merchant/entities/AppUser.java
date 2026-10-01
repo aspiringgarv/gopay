@@ -1,20 +1,22 @@
 package com.garv.gopay.merchant.entities;
 
+import com.garv.gopay.common.entities.BaseEntity;
 import com.garv.gopay.common.enums.UserRole;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "app_user")
+@Table(name = "app_user", indexes = {
+        @Index(name = "idx_app_user_merchant_id", columnList = "merchant_id")
+})
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class AppUser {
+public class AppUser extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -32,9 +34,5 @@ public class AppUser {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "merchant_id")
     private Merchant merchant;
-
-    private LocalDateTime createdAt;
-
-    private LocalDateTime updatedAt;
 
 }

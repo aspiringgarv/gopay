@@ -1,19 +1,22 @@
 package com.garv.gopay.merchant.entities;
 
+import com.garv.gopay.common.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "merchant_webhook_config")
+@Table(name = "merchant_webhook_config", indexes = {
+        @Index(name = "idx_merchant_webhook_config_merchant_id", columnList = "merchant_id"),
+        @Index(name = "idx_merchant_webhook_config_merchant_id_enabled", columnList = "merchant_id, enabled")
+})
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class MerchantWebhookConfig {
+public class MerchantWebhookConfig extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -34,7 +37,5 @@ public class MerchantWebhookConfig {
 
     @Column(nullable = false, length = 255)
     private String webhookSecretHash;
-
-    private LocalDateTime createdAt;
 
 }

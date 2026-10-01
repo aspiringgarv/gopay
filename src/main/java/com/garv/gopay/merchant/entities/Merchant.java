@@ -1,11 +1,11 @@
 package com.garv.gopay.merchant.entities;
 
+import com.garv.gopay.common.entities.BaseEntity;
 import com.garv.gopay.common.enums.BuisnessType;
 import com.garv.gopay.common.enums.MerchantStatus;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
@@ -15,7 +15,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Merchant {
+public class Merchant extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;

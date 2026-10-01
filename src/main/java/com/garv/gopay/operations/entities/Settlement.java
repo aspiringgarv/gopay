@@ -1,6 +1,7 @@
 package com.garv.gopay.operations.entities;
 
 import com.garv.gopay.common.Money;
+import com.garv.gopay.common.entities.BaseEntity;
 import com.garv.gopay.common.enums.SettlementStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -15,7 +16,7 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class Settlement {
+public class Settlement extends BaseEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private UUID id;
@@ -66,7 +67,5 @@ public class Settlement {
     private String bankReference;
 
     private LocalDateTime processedAt;
-
-    private LocalDateTime createdAt;
 
 }

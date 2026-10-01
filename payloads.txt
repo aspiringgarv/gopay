@@ -1,0 +1,23 @@
+Create Order — POST /v1/orders
+
+{
+  "amount": {
+    "amount": 50000,
+    "currency": "INR"
+  },
+  "receipt": "order_rcpt_12345",
+  "notes": {
+    "customer_name": "Garv Arora",
+    "order_type": "subscription"
+  },
+  "expiresAt": "2026-10-05T18:30:00"
+}
+
+Get Order — GET /v1/orders/{orderId}
+(no body)
+
+Cancel Order — PUT /v1/orders/{orderId}/cancel
+(no body)
+
+List Payments of Order — GET /v1/orders/{orderId}/payments
+(no body)
