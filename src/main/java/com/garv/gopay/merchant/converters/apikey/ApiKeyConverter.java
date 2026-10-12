@@ -20,7 +20,6 @@ public interface ApiKeyConverter {
     @Mapping(target = "previousKeySecretHash", ignore = true)
     @Mapping(target = "webhookSecretHash", ignore = true)
     @Mapping(target = "lastUsedAt", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
     @Mapping(target = "rotatedAt", ignore = true)
     @Mapping(target = "gracePeriodExpiresAt", ignore = true)
     ApiKey toEntity(Merchant merchant, CreateApiKeyRequest request, String keyId, String keySecretHash);

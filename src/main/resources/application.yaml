@@ -14,3 +14,34 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+
+vault:
+  # dev-only default; override via VAULT_MASTER_KEY in real environments (ideally sourced from a KMS)
+  master-key: ${VAULT_MASTER_KEY:FmJHUCta5p+TxKdTosNFDzOP0hKnOO9IX4TOulfywNo=}
+
+jwt:
+  # dev-only default; override via JWT_SECRET (base64, at least 32 bytes) in real environments
+  secret: ${JWT_SECRET:l8WN11+k7fn9kcK6lDHFX2X8Y+5XP4b6UGrQVo5IlG0=}
+  expiration-ms: 900000          # access token: 15 minutes
+  refresh-expiration-ms: 604800000   # refresh token: 7 days
+
+payment:
+  simulator:
+    polling-interval-ms: 5000
+    chaos-mode: NORMAL
+    method:
+      CARD:
+        min-delay-ms: 2000
+        max-delay-ms: 6000
+        success-rate: 90
+      UPI:
+        min-delay-ms: 1000
+        max-delay-ms: 3000
+        success-rate: 95
+      NETBANKING:
+        min-delay-ms: 4000
+        max-delay-ms: 10000
+        success-rate: 80
+
+
+

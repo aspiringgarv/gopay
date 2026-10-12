@@ -1,6 +1,7 @@
 package com.garv.gopay.merchant.services.impl;
 
 import com.garv.gopay.common.exceptions.ApiKeyRevokedException;
+import com.garv.gopay.common.exceptions.InvalidCredentialsException;
 import com.garv.gopay.common.exceptions.ResourceNotFoundException;
 import com.garv.gopay.common.util.RandomizerUtil;
 import com.garv.gopay.merchant.converters.apikey.ApiKeyConverter;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -30,6 +32,7 @@ public class ApiKeyServiceImpl implements ApiKeyService {
     private final ApiKeyRepository apiKeyRepository;
     private final MerchantRepository merchantRepository;
     private final ApiKeyConverter apiKeyConverter;
+    private final PasswordEncoder passwordEncoder;
 
     @Override
     @Transactional
@@ -40,7 +43,7 @@ public class ApiKeyServiceImpl implements ApiKeyService {
         String keyId = "gopay_" + request.environment().name().toUpperCase() +"_"+ RandomizerUtil.randomBase64(24);
         String keySecret = RandomizerUtil.randomBase64(40);
 
-        ApiKey apiKey = apiKeyConverter.toEntity(merchant, request, keyId, keySecret);
+        ApiKey apiKey = apiKeyConverter.toEntity(merchant, request, keyId, passwordEncoder.encode(keySecret));
 
         apiKey = apiKeyRepository.save(apiKey);
 
@@ -80,12 +83,35 @@ public class ApiKeyServiceImpl implements ApiKeyService {
         String newKeySecret = RandomizerUtil.randomBase64(40);
 
         apiKey.setPreviousKeySecretHash(apiKey.getKeySecretHash());
-        apiKey.setKeySecretHash(newKeySecret);
+        apiKey.setKeySecretHash(passwordEncoder.encode(newKeySecret));
         apiKey.setRotatedAt(LocalDateTime.now());
         apiKey.setGracePeriodExpiresAt(LocalDateTime.now().plusDays(1));
 
         apiKey = apiKeyRepository.save(apiKey);
 
         return apiKeyConverter.toPojo(apiKey, newKeySecret);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UUID authenticate(String keyId, String keySecret) {
+        // same error for unknown key, revoked key and wrong secret so callers cannot probe which key ids exist
+        ApiKey apiKey = apiKeyRepository.findByKeyId(keyId)
+                .filter(ApiKey::isEnabled)
+                .filter(key -> secretMatches(key, keySecret))
+                .orElseThrow(() -> new InvalidCredentialsException("INVALID_API_KEY", "Invalid API key or secret"));
+
+        return apiKey.getMerchant().getId();
+    }
+
+    private boolean secretMatches(ApiKey apiKey, String keySecret) {
+        if (passwordEncoder.matches(keySecret, apiKey.getKeySecretHash())) {
+            return true;
+        }
+        // after a rotation the previous secret keeps working until the grace period ends
+        return apiKey.getPreviousKeySecretHash() != null
+                && apiKey.getGracePeriodExpiresAt() != null
+                && LocalDateTime.now().isBefore(apiKey.getGracePeriodExpiresAt())
+                && passwordEncoder.matches(keySecret, apiKey.getPreviousKeySecretHash());
     }
 }

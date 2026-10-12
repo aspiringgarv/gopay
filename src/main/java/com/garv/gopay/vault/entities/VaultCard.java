@@ -1,6 +1,7 @@
 package com.garv.gopay.vault.entities;
 
 import com.garv.gopay.common.entities.BaseEntity;
+import com.garv.gopay.common.enums.CardBrand;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -27,8 +28,9 @@ public class VaultCard extends BaseEntity {
     @Column(nullable = false, length = 4)
     private String lastFour;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private String brand;
+    private CardBrand brand;
 
     @Column(nullable = false)
     private String bin;

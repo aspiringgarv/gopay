@@ -1,5 +1,6 @@
 package com.garv.gopay.payment.controllers;
 
+import com.garv.gopay.merchant.context.MerchantContext;
 import com.garv.gopay.payment.dto.request.CreateOrderRequest;
 import com.garv.gopay.payment.dto.response.OrderResponse;
 import com.garv.gopay.payment.dto.response.PaymentResponse;
@@ -27,27 +28,27 @@ public class OrderController {
     private final OrderService orderService;
     private final PaymentService paymentService;
 
-    UUID merchantId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    private final MerchantContext merchantContext;
 
     @PostMapping
     public ResponseEntity<OrderResponse> create(@Valid @RequestBody CreateOrderRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(orderService.create(request, merchantId));
+        return ResponseEntity.status(HttpStatus.CREATED).body(orderService.create(request, merchantContext.requireMerchantId()));
     }
 
     @GetMapping("/{orderId}")
     public ResponseEntity<OrderResponse> getById(@PathVariable UUID orderId) {
         // so that any other merchant cannot access the order of another merchant
-        return ResponseEntity.status(HttpStatus.OK).body(orderService.getById(orderId, merchantId));
+        return ResponseEntity.status(HttpStatus.OK).body(orderService.getById(orderId, merchantContext.requireMerchantId()));
     }
 
     @PutMapping("/{orderId}/cancel")
     public ResponseEntity<OrderResponse> cancel(@PathVariable UUID orderId) {
-        return ResponseEntity.status(HttpStatus.OK).body(orderService.cancel(orderId, merchantId));
+        return ResponseEntity.status(HttpStatus.OK).body(orderService.cancel(orderId, merchantContext.requireMerchantId()));
     }
 
     @GetMapping("/{orderId}/payments")
     public ResponseEntity<List<PaymentResponse>> listPayments(@PathVariable UUID orderId) {
-        return ResponseEntity.status(HttpStatus.OK).body(paymentService.listByOrder(orderId, merchantId));
+        return ResponseEntity.status(HttpStatus.OK).body(paymentService.listByOrder(orderId, merchantContext.requireMerchantId()));
     }
 
 }

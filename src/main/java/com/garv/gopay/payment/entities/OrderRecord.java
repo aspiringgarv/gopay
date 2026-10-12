@@ -51,8 +51,4 @@ public class OrderRecord extends BaseEntity {
     @Column(nullable = true)
     private String receipt;
 
-    private String createdBy;
-
-    private String updatedBy;
-
 }

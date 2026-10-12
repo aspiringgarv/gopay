@@ -24,7 +24,6 @@ public interface MerchantAuthConverter {
 
     @Mapping(target = "businessType", source = "buisnessType")
     @Mapping(target = "status", source = "merchantStatus")
-    @Mapping(target = "createdAt", ignore = true)
     MerchantSignupResponse toPojo(Merchant merchant);
 
 }

@@ -12,11 +12,9 @@ import org.mapstruct.MappingConstants;
 public interface AppUserAuthConverter {
 
     @Mapping(target = "email", source = "request.email")
-    @Mapping(target = "passwordHash", source = "request.password") // TODO: Hash the password before storing it via Bcrypt
+    @Mapping(target = "passwordHash", source = "request.password") // hashed with BCrypt in AuthServiceImpl.signup right after mapping
     @Mapping(target = "role", constant = "OWNER")
     @Mapping(target = "id", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "updatedAt", ignore = true)
     AppUser toEntity(MerchantSignupRequest request, Merchant merchant);
 
     AppUserResponse toPojo(AppUser appUser);
