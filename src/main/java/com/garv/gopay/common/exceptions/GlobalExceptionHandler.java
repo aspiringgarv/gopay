@@ -37,4 +37,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBusinessRuleViolationException(BusinessRuleViolationException businessRuleViolationException) {
         return ResponseEntity.status(HttpStatus.CONFLICT).body(ErrorResponse.of(businessRuleViolationException.getErrorCode(), businessRuleViolationException.getMessage()));
     }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handleRateLimitExceededException(RateLimitExceededException rateLimitExceededException) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(rateLimitExceededException.getRetryAfterSeconds()))
+                .body(ErrorResponse.of(rateLimitExceededException.getErrorCode(), rateLimitExceededException.getMessage()));
+    }
 }

@@ -1,8 +1,10 @@
 package com.garv.gopay.merchant.config;
 
 import com.garv.gopay.common.enums.UserRole;
+import com.garv.gopay.common.ratelimiting.RateLimiter;
+import com.garv.gopay.common.ratelimiting.cache.ApiKeyCache;
 import com.garv.gopay.merchant.context.MerchantContext;
-import com.garv.gopay.merchant.services.ApiKeyService;
+import com.garv.gopay.merchant.repositories.ApiKeyRepository;
 import com.garv.gopay.merchant.services.MerchantUserDetailsService;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
@@ -54,7 +56,10 @@ public class WebSecurityConfig {
     @Bean
     @Order(2)
     public SecurityFilterChain apiKeySecurityFilterChain(HttpSecurity http,
-                                                         ApiKeyService apiKeyService,
+                                                         ApiKeyRepository apiKeyRepository,
+                                                         ApiKeyCache apiKeyCache,
+                                                         PasswordEncoder passwordEncoder,
+                                                         RateLimiter rateLimiter,
                                                          @Qualifier("handlerExceptionResolver") HandlerExceptionResolver handlerExceptionResolver,
                                                          MerchantContext merchantContext) throws Exception {
         http
@@ -63,7 +68,7 @@ public class WebSecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
-                .addFilterBefore(new ApiKeyAuthenticationFilter(apiKeyService, handlerExceptionResolver, merchantContext),
+                .addFilterBefore(new ApiKeyAuthenticationFilter(apiKeyRepository, apiKeyCache, passwordEncoder, rateLimiter, handlerExceptionResolver, merchantContext),
                         UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

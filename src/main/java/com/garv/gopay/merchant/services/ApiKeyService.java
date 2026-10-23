@@ -16,7 +16,4 @@ public interface ApiKeyService {
     void revoke(UUID merchantId, String keyId);
 
     ApikeyCreateResponse rotate(UUID merchantId, String keyId);
-
-    /** Verifies a key id and secret and returns the id of the merchant that owns the key. */
-    UUID authenticate(String keyId, String keySecret);
 }

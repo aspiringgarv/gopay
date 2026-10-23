@@ -1,9 +1,9 @@
 package com.garv.gopay.merchant.services.impl;
 
 import com.garv.gopay.common.exceptions.ApiKeyRevokedException;
-import com.garv.gopay.common.exceptions.InvalidCredentialsException;
 import com.garv.gopay.common.exceptions.ResourceNotFoundException;
 import com.garv.gopay.common.util.RandomizerUtil;
+import com.garv.gopay.common.ratelimiting.cache.ApiKeyCache;
 import com.garv.gopay.merchant.converters.apikey.ApiKeyConverter;
 import com.garv.gopay.merchant.dto.request.CreateApiKeyRequest;
 import com.garv.gopay.merchant.dto.response.ApiKeyResponse;
@@ -33,6 +33,7 @@ public class ApiKeyServiceImpl implements ApiKeyService {
     private final MerchantRepository merchantRepository;
     private final ApiKeyConverter apiKeyConverter;
     private final PasswordEncoder passwordEncoder;
+    private final ApiKeyCache apiKeyCache;
 
     @Override
     @Transactional
@@ -68,6 +69,7 @@ public class ApiKeyServiceImpl implements ApiKeyService {
 
         apiKey.setEnabled(false);
         apiKeyRepository.save(apiKey);
+        apiKeyCache.evict(keyId);
     }
 
     @Override
@@ -88,30 +90,9 @@ public class ApiKeyServiceImpl implements ApiKeyService {
         apiKey.setGracePeriodExpiresAt(LocalDateTime.now().plusDays(1));
 
         apiKey = apiKeyRepository.save(apiKey);
+        apiKeyCache.evict(keyId);
 
         return apiKeyConverter.toPojo(apiKey, newKeySecret);
     }
 
-    @Override
-    @Transactional(readOnly = true)
-    public UUID authenticate(String keyId, String keySecret) {
-        // same error for unknown key, revoked key and wrong secret so callers cannot probe which key ids exist
-        ApiKey apiKey = apiKeyRepository.findByKeyId(keyId)
-                .filter(ApiKey::isEnabled)
-                .filter(key -> secretMatches(key, keySecret))
-                .orElseThrow(() -> new InvalidCredentialsException("INVALID_API_KEY", "Invalid API key or secret"));
-
-        return apiKey.getMerchant().getId();
-    }
-
-    private boolean secretMatches(ApiKey apiKey, String keySecret) {
-        if (passwordEncoder.matches(keySecret, apiKey.getKeySecretHash())) {
-            return true;
-        }
-        // after a rotation the previous secret keeps working until the grace period ends
-        return apiKey.getPreviousKeySecretHash() != null
-                && apiKey.getGracePeriodExpiresAt() != null
-                && LocalDateTime.now().isBefore(apiKey.getGracePeriodExpiresAt())
-                && passwordEncoder.matches(keySecret, apiKey.getPreviousKeySecretHash());
-    }
 }
