@@ -3,6 +3,7 @@ package com.garv.gopay.merchant.services.impl;
 import com.garv.gopay.common.exceptions.ApiKeyRevokedException;
 import com.garv.gopay.common.exceptions.ResourceNotFoundException;
 import com.garv.gopay.common.util.RandomizerUtil;
+import com.garv.gopay.common.ratelimiting.cache.ApiKeyCache;
 import com.garv.gopay.merchant.converters.apikey.ApiKeyConverter;
 import com.garv.gopay.merchant.dto.request.CreateApiKeyRequest;
 import com.garv.gopay.merchant.dto.response.ApiKeyResponse;
@@ -16,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jspecify.annotations.Nullable;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -30,6 +32,8 @@ public class ApiKeyServiceImpl implements ApiKeyService {
     private final ApiKeyRepository apiKeyRepository;
     private final MerchantRepository merchantRepository;
     private final ApiKeyConverter apiKeyConverter;
+    private final PasswordEncoder passwordEncoder;
+    private final ApiKeyCache apiKeyCache;
 
     @Override
     @Transactional
@@ -40,7 +44,7 @@ public class ApiKeyServiceImpl implements ApiKeyService {
         String keyId = "gopay_" + request.environment().name().toUpperCase() +"_"+ RandomizerUtil.randomBase64(24);
         String keySecret = RandomizerUtil.randomBase64(40);
 
-        ApiKey apiKey = apiKeyConverter.toEntity(merchant, request, keyId, keySecret);
+        ApiKey apiKey = apiKeyConverter.toEntity(merchant, request, keyId, passwordEncoder.encode(keySecret));
 
         apiKey = apiKeyRepository.save(apiKey);
 
@@ -65,6 +69,7 @@ public class ApiKeyServiceImpl implements ApiKeyService {
 
         apiKey.setEnabled(false);
         apiKeyRepository.save(apiKey);
+        apiKeyCache.evict(keyId);
     }
 
     @Override
@@ -80,12 +85,14 @@ public class ApiKeyServiceImpl implements ApiKeyService {
         String newKeySecret = RandomizerUtil.randomBase64(40);
 
         apiKey.setPreviousKeySecretHash(apiKey.getKeySecretHash());
-        apiKey.setKeySecretHash(newKeySecret);
+        apiKey.setKeySecretHash(passwordEncoder.encode(newKeySecret));
         apiKey.setRotatedAt(LocalDateTime.now());
         apiKey.setGracePeriodExpiresAt(LocalDateTime.now().plusDays(1));
 
         apiKey = apiKeyRepository.save(apiKey);
+        apiKeyCache.evict(keyId);
 
         return apiKeyConverter.toPojo(apiKey, newKeySecret);
     }
+
 }

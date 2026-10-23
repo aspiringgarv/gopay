@@ -1,3 +1,48 @@
+Signup — POST /v1/auth/signup
+
+{
+  "name": "Garv Arora",
+  "businessName": "Garv Stores",
+  "email": "garv@example.com",
+  "password": "password123",
+  "businessType": "PRIVATE_LIMITED"
+}
+
+Login — POST /v1/auth/login
+
+{
+  "email": "garv@example.com",
+  "password": "password123"
+}
+
+Response: { "accessToken": "<jwt>", "refreshToken": "<tokenId>:<secret>", "tokenType": "Bearer", "expiresInMs": 900000, "merchantId": "<merchant-uuid>" }
+(passwords are BCrypt-hashed at signup, so merchants created before this change cannot log in — sign up again)
+(accessToken now lasts 15 minutes; use refreshToken to get a new one without logging in again)
+
+Refresh Token — POST /v1/auth/refresh
+
+{
+  "refreshToken": "<tokenId>:<secret>"
+}
+
+Response: same shape as Login. The refresh token is single-use: every call rotates it, so save the new
+refreshToken from the response and discard the old one. Reusing an already-rotated refresh token revokes
+the whole session (all refresh tokens for that user).
+
+Logout — POST /v1/auth/logout
+
+{
+  "refreshToken": "<tokenId>:<secret>"
+}
+
+Response: 204, always — even for an unknown or already-revoked token, so this endpoint cannot be used to
+probe which refresh tokens are valid.
+
+Auth
+- /v1/auth/**, /v1/merchants/** : Authorization: Bearer <jwt from login>
+- /v1/orders/**, /v1/payments/**, /v1/vault/** : API key — Authorization: Basic base64(keyId:keySecret)
+  (Postman: Basic Auth, username = keyId, password = keySecret; both come from Create API Key — the secret is shown only once)
+
 Create Order — POST /v1/orders
 
 {
@@ -21,3 +66,56 @@ Cancel Order — PUT /v1/orders/{orderId}/cancel
 
 List Payments of Order — GET /v1/orders/{orderId}/payments
 (no body)
+
+List All Payments (merchant) — GET /v1/payments
+(no body)
+
+Initiate Payment — POST /v1/payments
+
+{
+  "orderId": "<order-uuid>",
+  "method": "UPI",
+  "methodDetails": {
+    "vpa": "garv@okaxis"
+  }
+}
+
+Capture Payment — PUT /v1/payments/{paymentId}/capture
+(no body)
+
+Tokenize Card — POST /v1/vault/tokenize
+
+{
+  "pan": "4111111111111111",
+  "cvv": "123",
+  "expiryMonth": 12,
+  "expiryYear": 2029,
+  "customerId": "<customer-uuid>"
+}
+
+--- Demo: deterministic outcomes (no reliance on random simulation) ---
+
+Card — always declines (CARD_DECLINED): tokenize + pay with PAN 4000000000000002
+
+Card — always expired (CARD_EXPIRED): tokenize with expiryMonth/expiryYear set to a month
+already passed this year (e.g. right now, use expiryMonth: 1, expiryYear: 2026)
+
+Initiate Payment — UPI always declines (UPI_DECLINED)
+POST /v1/payments
+{
+  "orderId": "<order-uuid>",
+  "method": "UPI",
+  "methodDetails": {
+    "vpa": "fail@upi"
+  }
+}
+
+Initiate Payment — Netbanking always declines (NBK_DECLINED)
+POST /v1/payments
+{
+  "orderId": "<order-uuid>",
+  "method": "NETBANKING",
+  "methodDetails": {
+    "bankCode": "FAIL001"
+  }
+}

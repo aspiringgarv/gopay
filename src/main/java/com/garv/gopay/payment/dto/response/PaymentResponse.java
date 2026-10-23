@@ -20,6 +20,7 @@ public record PaymentResponse(
         String errorCode,
         String errorDescription,
         Money refundedAmount,
+        LocalDateTime authorizedAt,
         LocalDateTime capturedAt,
         LocalDateTime settledAt,
         LocalDateTime createdAt

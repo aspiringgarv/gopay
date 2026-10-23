@@ -21,9 +21,6 @@ public interface OrderConverter {
     @Mapping(target = "id", ignore = true)
     @Mapping(target = "attempts", ignore = true)
     @Mapping(target = "expiresAt", ignore = true)
-    @Mapping(target = "createdAt", ignore = true)
-    @Mapping(target = "createdBy", ignore = true)
-    @Mapping(target = "updatedBy", ignore = true)
     OrderRecord toEntity(CreateOrderRequest request, UUID merchantId, @Context int defaultExpiryMinutes);
 
     OrderResponse toPojo(OrderRecord orderRecord);

@@ -1,6 +1,7 @@
 package com.garv.gopay.merchant.repositories;
 
 import com.garv.gopay.merchant.entities.ApiKey;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -14,5 +15,8 @@ public interface ApiKeyRepository extends JpaRepository<ApiKey, UUID> {
     List<ApiKey> findByMerchant_Id(UUID merchantId);
 
     Optional<ApiKey> findByKeyIdAndMerchant_Id(String keyId, UUID merchantId);
+
+    @EntityGraph(attributePaths = "merchant")
+    Optional<ApiKey> findByKeyId(String keyId);
 
 }

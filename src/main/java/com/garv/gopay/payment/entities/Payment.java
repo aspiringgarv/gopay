@@ -52,6 +52,9 @@ public class Payment extends BaseEntity {
     private Map<String, Object> methodDetails;
 
     @Column(length = 255)
+    private String processorReference;
+
+    @Column(length = 255)
     private String bankReference;
 
     @Column(length = 255)
@@ -67,6 +70,8 @@ public class Payment extends BaseEntity {
     })
     @Builder.Default
     private Money refundedAmount = Money.of(0, null);
+
+    private LocalDateTime authorizedAt;
 
     private LocalDateTime capturedAt;
 
