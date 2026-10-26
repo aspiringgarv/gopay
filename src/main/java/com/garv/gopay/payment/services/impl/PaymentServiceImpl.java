@@ -59,7 +59,10 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     @Transactional
     public PaymentResponse initiate(@NonNull PaymentInitRequest paymentInitRequest, @NonNull UUID merchantId) {
-        OrderRecord order = orderRepository.findByIdAndMerchantId(paymentInitRequest.orderId(), merchantId)
+        // locked for the rest of this transaction: two concurrent initiate() calls on the same order
+        // could otherwise both read status != PAID/CANCELLED, both pass the checks below, and both
+        // create a payment — the lock makes the second request wait until this one commits instead
+        OrderRecord order = orderRepository.findByIdAndMerchantIdForUpdate(paymentInitRequest.orderId(), merchantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order", paymentInitRequest.orderId().toString()));
 
         if (order.getStatus() == OrderStatus.PAID) {
@@ -111,7 +114,10 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     @Transactional
     public PaymentResponse capture(@NonNull UUID paymentId, @NonNull UUID merchantId) {
-        Payment payment = paymentRepository.findByIdAndMerchantId(paymentId, merchantId)
+        // locked for the rest of this transaction: two concurrent capture() calls on the same payment
+        // could otherwise both read AUTHORIZED, both pass the check below, and both capture it —
+        // the lock makes the second request wait until this one commits instead
+        Payment payment = paymentRepository.findByIdAndMerchantIdForUpdate(paymentId, merchantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment", paymentId.toString()));
 
         if (payment.getStatus() != PaymentStatus.AUTHORIZED) {
