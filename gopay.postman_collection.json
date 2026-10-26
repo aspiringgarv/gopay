@@ -43,6 +43,10 @@
     {
       "key": "refreshToken",
       "value": ""
+    },
+    {
+      "key": "idempotencyKey",
+      "value": "demo-idem-key-1"
     }
   ],
   "item": [
@@ -344,6 +348,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "X-Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "url": {
@@ -401,7 +409,12 @@
           "name": "Cancel Order",
           "request": {
             "method": "PUT",
-            "header": [],
+            "header": [
+              {
+                "key": "X-Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/v1/orders/{{orderId}}/cancel",
               "host": [
@@ -480,6 +493,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "X-Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "url": {
@@ -523,6 +540,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "X-Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "url": {
@@ -566,6 +587,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "X-Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "url": {
@@ -609,6 +634,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "X-Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "url": {
@@ -652,6 +681,10 @@
               {
                 "key": "Content-Type",
                 "value": "application/json"
+              },
+              {
+                "key": "X-Idempotency-Key",
+                "value": "{{idempotencyKey}}"
               }
             ],
             "url": {

@@ -71,6 +71,10 @@ List All Payments (merchant) — GET /v1/payments
 (no body)
 
 Initiate Payment — POST /v1/payments
+Optional header: X-Idempotency-Key: <any string> — send the same value on a retry to get back
+the exact same response (same payment id, same timestamps) instead of creating a second payment.
+Scoped per merchant, so two merchants can safely reuse the same literal key. Only applies to
+POST/PUT/PATCH; the claim lasts 30s, the replayable result lasts 24h.
 
 {
   "orderId": "<order-uuid>",

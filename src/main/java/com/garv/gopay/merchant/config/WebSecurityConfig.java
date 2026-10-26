@@ -1,6 +1,8 @@
 package com.garv.gopay.merchant.config;
 
 import com.garv.gopay.common.enums.UserRole;
+import com.garv.gopay.common.idempotency.IdempotencyFilter;
+import com.garv.gopay.common.idempotency.IdempotencyStore;
 import com.garv.gopay.common.ratelimiting.RateLimiter;
 import com.garv.gopay.common.ratelimiting.cache.ApiKeyCache;
 import com.garv.gopay.merchant.context.MerchantContext;
@@ -37,8 +39,12 @@ public class WebSecurityConfig {
     public SecurityFilterChain jwtSecurityFilterChain(HttpSecurity http,
                                                    JwtUtil jwtUtil,
                                                    MerchantUserDetailsService merchantUserDetailsService,
+                                                   IdempotencyStore idempotencyStore,
                                                    @Qualifier("handlerExceptionResolver") HandlerExceptionResolver handlerExceptionResolver,
                                                    MerchantContext merchantContext) throws Exception {
+        JwtAuthenticationFilter jwtAuthenticationFilter =
+                new JwtAuthenticationFilter(jwtUtil, merchantUserDetailsService, handlerExceptionResolver, merchantContext);
+
         http
                 .securityMatcher(JWT_ROUTES)
                 .csrf(csrf -> csrf.disable())
@@ -47,8 +53,9 @@ public class WebSecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/v1/auth/signup", "/v1/auth/login", "/v1/auth/refresh", "/v1/auth/logout").permitAll()
                         .anyRequest().authenticated())
-                .addFilterBefore(new JwtAuthenticationFilter(jwtUtil, merchantUserDetailsService, handlerExceptionResolver, merchantContext),
-                        UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // runs only after jwtAuthenticationFilter, so MerchantContext is already populated by then
+                .addFilterAfter(new IdempotencyFilter(idempotencyStore, merchantContext), JwtAuthenticationFilter.class);
 
         return http.build();
     }
@@ -60,16 +67,21 @@ public class WebSecurityConfig {
                                                          ApiKeyCache apiKeyCache,
                                                          PasswordEncoder passwordEncoder,
                                                          RateLimiter rateLimiter,
+                                                         IdempotencyStore idempotencyStore,
                                                          @Qualifier("handlerExceptionResolver") HandlerExceptionResolver handlerExceptionResolver,
                                                          MerchantContext merchantContext) throws Exception {
+        ApiKeyAuthenticationFilter apiKeyAuthenticationFilter = new ApiKeyAuthenticationFilter(
+                apiKeyRepository, apiKeyCache, passwordEncoder, rateLimiter, handlerExceptionResolver, merchantContext);
+
         http
                 .securityMatcher(API_KEY_ROUTES)
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
-                .addFilterBefore(new ApiKeyAuthenticationFilter(apiKeyRepository, apiKeyCache, passwordEncoder, rateLimiter, handlerExceptionResolver, merchantContext),
-                        UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(apiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // runs only after apiKeyAuthenticationFilter, so MerchantContext is already populated by then
+                .addFilterAfter(new IdempotencyFilter(idempotencyStore, merchantContext), ApiKeyAuthenticationFilter.class);
 
         return http.build();
     }
