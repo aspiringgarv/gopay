@@ -28,6 +28,11 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     Optional<Payment> findByIdAndMerchantIdForUpdate(UUID id, UUID merchantId);
 
+    // same as above but with no merchantId — for callers that don't have one, like the bank callback
+    // simulator, which only ever knows a paymentId
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    Optional<Payment> findByIdForUpdate(UUID id);
+
     List<Payment> findByStatus(PaymentStatus status);
 
     List<Payment> findByStatusAndUpdatedAtAfter(PaymentStatus status, LocalDateTime updatedAtAfter);

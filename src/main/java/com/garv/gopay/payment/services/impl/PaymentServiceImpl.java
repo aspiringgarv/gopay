@@ -132,7 +132,10 @@ public class PaymentServiceImpl implements PaymentService {
     @Override
     @Transactional
     public void resolveAuthorization(@NonNull UUID paymentId, boolean approve, String bankRef, String errorCode, String errorDesc) {
-        Payment payment = paymentRepository.findById(paymentId)
+        // locked for the rest of this transaction: an overlapping bank callback (or a manual capture
+        // racing it) on the same payment could otherwise both read AUTHORIZING and both act on it —
+        // the lock makes the second one wait until this one commits instead
+        Payment payment = paymentRepository.findByIdForUpdate(paymentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Payment", paymentId.toString()));
 
         if (payment.getStatus() != PaymentStatus.AUTHORIZING) {
