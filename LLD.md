@@ -98,6 +98,40 @@ somewhere it shouldn't be. `PaymentTransitionService` wraps every call with an a
 triggered it (`Actor`: `CUSTOMER`/`MERCHANT`/`SYSTEM`), what event fired, what status it left and
 entered. Nothing in `PaymentServiceImpl` ever calls `payment.setStatus(...)` directly.
 
+<figure role="img" aria-label="Payment status state machine: CREATED moves through AUTHORIZING, AUTHORIZED, CAPTURING to CAPTURED on success events, or to FAILED from AUTHORIZING or CAPTURING on failure events.">
+<svg viewBox="0 0 760 230" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arrow-state" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+<marker id="arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--danger)"/></marker>
+</defs>
+<rect x="20" y="30" width="110" height="46" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="75" y="58" text-anchor="middle" font-size="12" fill="currentColor">CREATED</text>
+<rect x="165" y="30" width="110" height="46" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="220" y="58" text-anchor="middle" font-size="12" fill="currentColor">AUTHORIZING</text>
+<rect x="310" y="30" width="110" height="46" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="365" y="58" text-anchor="middle" font-size="12" fill="currentColor">AUTHORIZED</text>
+<rect x="455" y="30" width="110" height="46" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="510" y="58" text-anchor="middle" font-size="12" fill="currentColor">CAPTURING</text>
+<rect x="600" y="30" width="110" height="46" rx="8" fill="var(--success-soft)" stroke="var(--success)"/>
+<text x="655" y="58" text-anchor="middle" font-size="12" fill="currentColor">CAPTURED</text>
+<rect x="310" y="155" width="110" height="46" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+<text x="365" y="183" text-anchor="middle" font-size="12" fill="currentColor">FAILED</text>
+<line x1="130" y1="53" x2="165" y2="53" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-state)"/>
+<text x="95" y="44" font-size="9.5" fill="var(--ink-muted)">AUTHORIZE_ATTEMPT</text>
+<line x1="275" y1="53" x2="310" y2="53" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-state)"/>
+<text x="245" y="44" font-size="9.5" fill="var(--ink-muted)">AUTHORIZE_SUCCESS</text>
+<line x1="420" y1="53" x2="455" y2="53" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-state)"/>
+<text x="390" y="44" font-size="9.5" fill="var(--ink-muted)">CAPTURE_REQUEST</text>
+<line x1="565" y1="53" x2="600" y2="53" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-state)"/>
+<text x="540" y="44" font-size="9.5" fill="var(--ink-muted)">CAPTURE_SUCCESS</text>
+<line x1="235" y1="76" x2="330" y2="155" stroke="var(--danger)" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#arrow-fail)"/>
+<text x="195" y="115" font-size="9.5" fill="var(--danger)">AUTHORIZE_FAIL</text>
+<line x1="495" y1="76" x2="400" y2="155" stroke="var(--danger)" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#arrow-fail)"/>
+<text x="430" y="115" font-size="9.5" fill="var(--danger)">CAPTURE_FAIL</text>
+</svg>
+<figcaption>Every arrow is one PaymentEvent, validated against PaymentStateMachine's (status, event) → status table and logged to PaymentTransitionLog with its actor — nothing in PaymentServiceImpl calls setStatus() directly.</figcaption>
+</figure>
+
 ### Chain of Responsibility: the filter stack
 Three custom `OncePerRequestFilter`s, each solving one concern, composed by `WebSecurityConfig`
 into two separate Spring Security filter chains (see Security section below):
@@ -144,6 +178,52 @@ is handled by exactly one:
 | JWT (`@Order(1)`) | `/v1/auth/**`, `/v1/merchants/**`, `/v1/admin/**`, `/actuator/**` | `Authorization: Bearer <jwt>` |
 | API key (`@Order(2)`) | `/v1/orders/**`, `/v1/payments/**`, `/v1/vault/**` | `Authorization: Basic base64(keyId:keySecret)` |
 
+<figure role="img" aria-label="Two independent security filter chains, JWT and API key, both converging into the same request-scoped MerchantContext before the IdempotencyFilter and the controller run.">
+<svg viewBox="0 0 720 500" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arrow-auth" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+</defs>
+<rect x="280" y="10" width="160" height="40" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="360" y="35" text-anchor="middle" font-size="12" fill="currentColor">Client request</text>
+<rect x="30" y="90" width="270" height="60" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="165" y="110" text-anchor="middle" font-size="11" fill="currentColor">JWT chain (@Order(1))</text>
+<text x="165" y="126" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">/v1/auth/**, /v1/merchants/**,</text>
+<text x="165" y="140" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">/v1/admin/**, /actuator/**</text>
+<rect x="30" y="190" width="270" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="165" y="211" text-anchor="middle" font-size="11.5" fill="currentColor">JwtAuthenticationFilter</text>
+<text x="165" y="227" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">validates Bearer JWT</text>
+<rect x="420" y="90" width="270" height="60" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="555" y="110" text-anchor="middle" font-size="11" fill="currentColor">API key chain (@Order(2))</text>
+<text x="555" y="126" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">/v1/orders/**, /v1/payments/**,</text>
+<text x="555" y="140" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">/v1/vault/**</text>
+<rect x="420" y="190" width="270" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="555" y="211" text-anchor="middle" font-size="11.5" fill="currentColor">ApiKeyAuthenticationFilter</text>
+<text x="555" y="227" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">Basic keyId:secret (Redis cache-aside)</text>
+<rect x="270" y="285" width="180" height="55" rx="8" fill="var(--success-soft)" stroke="var(--success)"/>
+<text x="360" y="308" text-anchor="middle" font-size="11.5" fill="currentColor">MerchantContext</text>
+<text x="360" y="324" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">request-scoped bean</text>
+<rect x="260" y="375" width="200" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="360" y="396" text-anchor="middle" font-size="11.5" fill="currentColor">IdempotencyFilter</text>
+<text x="360" y="412" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">addFilterAfter(...)</text>
+<rect x="300" y="445" width="120" height="40" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="360" y="469" text-anchor="middle" font-size="11.5" fill="currentColor">Controller</text>
+<line x1="330" y1="50" x2="180" y2="90" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-auth)"/>
+<text x="195" y="72" font-size="10" fill="var(--ink-muted)">Bearer &lt;jwt&gt;</text>
+<line x1="390" y1="50" x2="540" y2="90" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-auth)"/>
+<text x="460" y="72" font-size="10" fill="var(--ink-muted)">Basic base64(keyId:secret)</text>
+<line x1="165" y1="150" x2="165" y2="190" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-auth)"/>
+<line x1="555" y1="150" x2="555" y2="190" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-auth)"/>
+<line x1="200" y1="240" x2="320" y2="285" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-auth)"/>
+<text x="175" y="268" font-size="10" fill="var(--ink-muted)">sets merchantId + role</text>
+<line x1="520" y1="240" x2="400" y2="285" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-auth)"/>
+<text x="460" y="268" font-size="10" fill="var(--ink-muted)">sets merchantId</text>
+<line x1="360" y1="340" x2="360" y2="375" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-auth)"/>
+<text x="368" y="362" font-size="10" fill="var(--ink-muted)">requireMerchantId()</text>
+<line x1="360" y1="425" x2="360" y2="445" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-auth)"/>
+</svg>
+<figcaption>Two independent chains authenticate the caller and populate the same MerchantContext before the IdempotencyFilter — and the controller — ever run.</figcaption>
+</figure>
+
 ### JWT: short-lived access token + revocable refresh token
 A JWT can't be revoked early — it's trusted on signature and expiry alone, nothing is looked up.
 So the access token is kept short (15 min), paired with a second, server-tracked token that
@@ -188,6 +268,30 @@ with its own key prefix, and — this is the part worth being deliberate about �
 | Cache (`ApiKeyCache`) | `apikey:` | **Fails open** — falls back to the database |
 | Rate limit (`RateLimiter`) | `ratelimit:` | **Fails open** — allows the request rather than blocking real traffic |
 | Idempotency (`IdempotencyStore`) | `idempotency:` | **Fails closed** — `setIfAbsent` throws |
+
+<figure role="img" aria-label="One Redis instance backs three independent jobs, each key-prefixed, with two different failure policies: the cache and rate limiter fail open, the idempotency store fails closed.">
+<svg viewBox="0 0 700 280" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arrow-redis" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+<marker id="arrow-redis-danger" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--danger)"/></marker>
+</defs>
+<rect x="30" y="110" width="140" height="70" rx="10" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="100" y="150" text-anchor="middle" font-size="13" fill="currentColor">Redis</text>
+<rect x="420" y="20" width="250" height="62" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="545" y="44" text-anchor="middle" font-size="11.5" fill="currentColor">ApiKeyCache — apikey:*</text>
+<text x="545" y="62" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">fails open → DB fallback</text>
+<rect x="420" y="107" width="250" height="62" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="545" y="131" text-anchor="middle" font-size="11.5" fill="currentColor">RateLimiter — ratelimit:*</text>
+<text x="545" y="149" text-anchor="middle" font-size="10.5" fill="var(--ink-muted)">fails open → allows the request</text>
+<rect x="420" y="194" width="250" height="66" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+<text x="545" y="219" text-anchor="middle" font-size="11.5" fill="currentColor">IdempotencyStore — idempotency:*</text>
+<text x="545" y="237" text-anchor="middle" font-size="10.5" fill="var(--danger)">fails closed → setIfAbsent throws</text>
+<line x1="170" y1="130" x2="420" y2="52" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-redis)"/>
+<line x1="170" y1="145" x2="420" y2="138" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow-redis)"/>
+<line x1="170" y1="165" x2="420" y2="227" stroke="var(--danger)" stroke-width="1.5" marker-end="url(#arrow-redis-danger)"/>
+</svg>
+<figcaption>The difference that matters: a cache or rate limiter can safely fail open because something else is still correct on its own; idempotency can't, so it's the one Redis call in the codebase allowed to throw back to the caller.</figcaption>
+</figure>
 
 A cache or a rate limiter can safely fail open, because something else (the database, or simply
 allowing the request) is still correct on its own. Idempotency can't: the entire reason it exists
@@ -235,6 +339,50 @@ naturally idempotent on its own) behind an optional `X-Idempotency-Key` header:
    replayable result. **`≥ 400` or an exception** → `delete(key)`, releasing it for a real retry.
 4. A second request with the same key: already-stored result → replay it verbatim, `200`, no
    controller call at all. Still `"IN_PROGRESS"` → `409 DUPLICATE_IDEMPOTENCY_KEY`.
+
+<figure role="img" aria-label="Idempotency claim and finalize flow: the first request claims the key and stores its result; a concurrent request with the same key is rejected with 409 while the claim is in progress; a later request with the same key replays the stored result without calling the controller.">
+<svg viewBox="0 0 760 310" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arrow-idem" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+</defs>
+<text x="10" y="25" font-size="11" fill="var(--ink-muted)">Request A</text>
+<rect x="140" y="10" width="170" height="50" rx="8" fill="var(--success-soft)" stroke="var(--success)"/>
+<text x="225" y="30" text-anchor="middle" font-size="10" fill="currentColor">setIfAbsent(key, 30s)</text>
+<text x="225" y="46" text-anchor="middle" font-size="10" fill="var(--ink-muted)">claims IN_PROGRESS</text>
+<rect x="350" y="10" width="170" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="435" y="30" text-anchor="middle" font-size="10" fill="currentColor">Controller runs</text>
+<text x="435" y="46" text-anchor="middle" font-size="10" fill="var(--ink-muted)">ContentCachingResponseWrapper</text>
+<rect x="560" y="10" width="170" height="50" rx="8" fill="var(--success-soft)" stroke="var(--success)"/>
+<text x="645" y="30" text-anchor="middle" font-size="10" fill="currentColor">&lt;400 → store(key, body, 24h)</text>
+<line x1="310" y1="35" x2="350" y2="35" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-idem)"/>
+<line x1="520" y1="35" x2="560" y2="35" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-idem)"/>
+<text x="10" y="135" font-size="11" fill="var(--ink-muted)">Request B</text>
+<text x="10" y="150" font-size="9.5" fill="var(--ink-muted)">(same key,</text>
+<text x="10" y="163" font-size="9.5" fill="var(--ink-muted)">concurrent)</text>
+<rect x="140" y="120" width="170" height="50" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+<text x="225" y="140" text-anchor="middle" font-size="10" fill="currentColor">setIfAbsent(key, 30s)</text>
+<text x="225" y="156" text-anchor="middle" font-size="10" fill="var(--danger)">fails — already IN_PROGRESS</text>
+<rect x="350" y="120" width="170" height="50" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+<text x="435" y="140" text-anchor="middle" font-size="10" fill="currentColor">409</text>
+<text x="435" y="156" text-anchor="middle" font-size="9.5" fill="var(--danger)">DUPLICATE_IDEMPOTENCY_KEY</text>
+<text x="435" y="168" text-anchor="middle" font-size="8.5" fill="var(--ink-muted)">controller never runs</text>
+<line x1="310" y1="145" x2="350" y2="145" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-idem)"/>
+<text x="10" y="245" font-size="11" fill="var(--ink-muted)">Request B</text>
+<text x="10" y="260" font-size="9.5" fill="var(--ink-muted)">(same key,</text>
+<text x="10" y="273" font-size="9.5" fill="var(--ink-muted)">after A finished)</text>
+<rect x="140" y="230" width="170" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="225" y="250" text-anchor="middle" font-size="10" fill="currentColor">get(key)</text>
+<text x="225" y="266" text-anchor="middle" font-size="10" fill="var(--ink-muted)">finds stored result</text>
+<rect x="350" y="230" width="170" height="50" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="435" y="250" text-anchor="middle" font-size="10" fill="currentColor">replay stored body, 200</text>
+<text x="435" y="266" text-anchor="middle" font-size="8.5" fill="var(--ink-muted)">controller never runs</text>
+<line x1="310" y1="255" x2="350" y2="255" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-idem)"/>
+<line x1="225" y1="60" x2="225" y2="120" stroke="var(--ink-muted)" stroke-width="1" stroke-dasharray="3 3"/>
+<line x1="225" y1="60" x2="225" y2="230" stroke="var(--ink-muted)" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="232" y="100" font-size="9" fill="var(--ink-muted)">same Redis key</text>
+</svg>
+<figcaption>The 30s claim and the 24h result share one Redis key — that's what makes a concurrent duplicate a 409 instead of a double-charge, and a later retry a clean replay instead of a second controller call.</figcaption>
+</figure>
 
 **Two deliberately different TTLs.** The 30s claim only needs to outlast one request's processing
 time — a self-healing safety net: if the server crashes before `delete()` ever runs, the lock
