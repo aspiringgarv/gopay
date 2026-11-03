@@ -5,8 +5,9 @@ bank that answers for itself. There's no real bank or card network behind any of
 outcome (pending, success, decline) is simulated so the full order → payment → settlement flow
 can be exercised end to end without a sandbox integration.
 
-A living diagram of the system (domain model, request flows, state machine) is kept here:
-**[Gopay System Map](https://claude.ai/artifact/CNbD7FWSfKPT9kQofnWEp3)**.
+A living diagram of the system (domain model, request flows, state machine) and the low-level
+design doc are both hosted here, no login required:
+**[Gopay System Map & LLD](https://aspiringgarv.github.io/gopay/)**.
 
 ## What's in it
 
