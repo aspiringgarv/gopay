@@ -143,20 +143,24 @@
     <article id="content" style="display:none;"></article>
   </main>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/14.1.0/markdown-it.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.2/markdown-it.min.js"></script>
   <script>
     (function () {
-      var md = window.markdownit({ html: false, linkify: true, typographer: true });
-      fetch('LLD.md')
-        .then(function (r) { return r.text(); })
-        .then(function (text) {
-          document.getElementById('content').innerHTML = md.render(text);
-          document.getElementById('content').style.display = 'block';
-          document.getElementById('loading').style.display = 'none';
-        })
-        .catch(function (err) {
-          document.getElementById('loading').textContent = 'Failed to load LLD.md: ' + err;
-        });
+      try {
+        var md = window.markdownit({ html: false, linkify: true, typographer: true });
+        fetch('LLD.md')
+          .then(function (r) { return r.text(); })
+          .then(function (text) {
+            document.getElementById('content').innerHTML = md.render(text);
+            document.getElementById('content').style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+          })
+          .catch(function (err) {
+            document.getElementById('loading').textContent = 'Failed to load LLD.md: ' + err;
+          });
+      } catch (err) {
+        document.getElementById('loading').textContent = 'Failed to load markdown renderer: ' + err;
+      }
     })();
   </script>
 </body>
