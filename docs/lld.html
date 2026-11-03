@@ -1,0 +1,163 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gopay — Low-Level Design</title>
+<style>
+  :root{
+    --paper:#f2f3f6;
+    --surface:#ffffff;
+    --ink:#14171d;
+    --ink-muted:#5a6270;
+    --line:#d9dce2;
+    --accent:#32459c;
+    --accent-soft:#e8eaf7;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --paper:#15171c;
+      --surface:#1b1e25;
+      --ink:#e7e9ee;
+      --ink-muted:#9aa2b0;
+      --line:#2b2f38;
+      --accent:#8fa0f2;
+      --accent-soft:#242a44;
+      color-scheme:dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#15171c;
+    --surface:#1b1e25;
+    --ink:#e7e9ee;
+    --ink-muted:#9aa2b0;
+    --line:#2b2f38;
+    --accent:#8fa0f2;
+    --accent-soft:#242a44;
+    color-scheme:dark;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'IBM Plex Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  }
+  .font-mono{font-family:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;}
+
+  .topbar{
+    position:sticky;
+    top:0;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:14px 24px;
+    border-bottom:1px solid var(--line);
+    background:var(--paper);
+    z-index:10;
+  }
+  .topbar a{
+    color:var(--accent);
+    text-decoration:none;
+    font-size:13.5px;
+    font-weight:600;
+  }
+  .topbar .brand{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:var(--ink-muted);
+  }
+
+  main{
+    max-width:800px;
+    margin:0 auto;
+    padding:40px 24px 120px;
+  }
+
+  h1{font-size:clamp(28px,4vw,36px);font-weight:700;letter-spacing:-0.015em;margin:0 0 18px;}
+  h2{font-size:22px;font-weight:700;margin:40px 0 14px;padding-top:8px;border-top:1px solid var(--line);}
+  h2:first-of-type{border-top:none;padding-top:0;}
+  h3{font-size:16.5px;font-weight:700;margin:26px 0 10px;color:var(--accent);}
+  p,li{line-height:1.65;font-size:15px;}
+  p{margin:0 0 14px;}
+  ul,ol{margin:0 0 14px;padding-left:22px;}
+  li{margin-bottom:6px;}
+  a{color:var(--accent);}
+  strong{font-weight:700;}
+  hr{border:none;border-top:1px solid var(--line);margin:32px 0;}
+
+  code{
+    font-family:'IBM Plex Mono','SFMono-Regular',Consolas,monospace;
+    font-size:13px;
+    background:var(--accent-soft);
+    color:var(--accent);
+    padding:2px 5px;
+    border-radius:4px;
+  }
+  pre{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:16px 18px;
+    overflow-x:auto;
+    margin:0 0 16px;
+  }
+  pre code{
+    background:none;
+    color:var(--ink);
+    padding:0;
+    font-size:13px;
+    line-height:1.55;
+  }
+
+  table{
+    width:100%;
+    border-collapse:collapse;
+    margin:0 0 18px;
+    font-size:14px;
+  }
+  th,td{
+    text-align:left;
+    padding:8px 12px;
+    border:1px solid var(--line);
+  }
+  th{
+    background:var(--surface);
+    font-weight:700;
+    font-size:12.5px;
+    text-transform:uppercase;
+    letter-spacing:.03em;
+    color:var(--ink-muted);
+  }
+
+  #loading{color:var(--ink-muted);font-size:14px;padding:40px 0;}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <span class="brand">gopay</span>
+    <a href="index.html">← System Map</a>
+  </div>
+  <main>
+    <div id="loading">Loading…</div>
+    <article id="content" style="display:none;"></article>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/14.1.0/markdown-it.min.js"></script>
+  <script>
+    (function () {
+      var md = window.markdownit({ html: false, linkify: true, typographer: true });
+      fetch('LLD.md')
+        .then(function (r) { return r.text(); })
+        .then(function (text) {
+          document.getElementById('content').innerHTML = md.render(text);
+          document.getElementById('content').style.display = 'block';
+          document.getElementById('loading').style.display = 'none';
+        })
+        .catch(function (err) {
+          document.getElementById('loading').textContent = 'Failed to load LLD.md: ' + err;
+        });
+    })();
+  </script>
+</body>
+</html>
