@@ -9,6 +9,10 @@
     --line:#d9dce2;
     --accent:#32459c;
     --accent-soft:#e8eaf7;
+    --success:#1b7a4d;
+    --success-soft:#e4f3ea;
+    --danger:#b23b3b;
+    --danger-soft:#f8e6e6;
     color-scheme:light;
   }
   @media (prefers-color-scheme:dark){
@@ -20,6 +24,10 @@
       --line:#2b2f38;
       --accent:#8fa0f2;
       --accent-soft:#242a44;
+      --success:#4fd38a;
+      --success-soft:#16301f;
+      --danger:#e8787c;
+      --danger-soft:#3a1c1c;
       color-scheme:dark;
     }
   }
@@ -31,6 +39,10 @@
     --line:#2b2f38;
     --accent:#8fa0f2;
     --accent-soft:#242a44;
+    --success:#4fd38a;
+    --success-soft:#16301f;
+    --danger:#e8787c;
+    --danger-soft:#3a1c1c;
     color-scheme:dark;
   }
 
@@ -131,6 +143,10 @@
   }
 
   #loading{color:var(--ink-muted);font-size:14px;padding:40px 0;}
+
+  figure{margin:24px 0;}
+  figure svg{display:block;width:100%;height:auto;margin:0 auto;}
+  figcaption{font-size:12.5px;line-height:1.5;color:var(--ink-muted);text-align:center;margin-top:10px;}
 </style>
 </head>
 <body>
@@ -147,7 +163,7 @@
   <script>
     (function () {
       try {
-        var md = window.markdownit({ html: false, linkify: true, typographer: true });
+        var md = window.markdownit({ html: true, linkify: true, typographer: true });
         fetch('LLD.md')
           .then(function (r) { return r.text(); })
           .then(function (text) {
