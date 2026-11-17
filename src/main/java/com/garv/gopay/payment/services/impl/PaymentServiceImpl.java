@@ -1,6 +1,7 @@
 package com.garv.gopay.payment.services.impl;
 
 import com.garv.gopay.common.enums.Actor;
+import com.garv.gopay.common.enums.AggregateType;
 import com.garv.gopay.common.enums.OrderStatus;
 import com.garv.gopay.common.enums.PaymentEvent;
 import com.garv.gopay.common.enums.PaymentStatus;
@@ -15,6 +16,7 @@ import com.garv.gopay.payment.entities.Payment;
 import com.garv.gopay.payment.gateway.PaymentGatewayRouter;
 import com.garv.gopay.payment.gateway.dto.PaymentRequest;
 import com.garv.gopay.payment.gateway.dto.PaymentResult;
+import com.garv.gopay.payment.outbox.OutboxEventPublisher;
 import com.garv.gopay.payment.repositories.OrderRepository;
 import com.garv.gopay.payment.repositories.PaymentRepository;
 import com.garv.gopay.payment.services.PaymentService;
@@ -27,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -39,6 +42,7 @@ public class PaymentServiceImpl implements PaymentService {
     private final PaymentConverter paymentConverter;
     private final PaymentGatewayRouter paymentGatewayRouter;
     private final PaymentTransitionService paymentTransitionService;
+    private final OutboxEventPublisher outboxEventPublisher;
 
     @Override
     @Transactional(readOnly = true)
@@ -106,7 +110,20 @@ public class PaymentServiceImpl implements PaymentService {
 
         payment = paymentRepository.save(payment);
 
-        //TODO : Kafka event publishing for payment initiation
+        // written in the same transaction as the payment/order save above — OutboxEventPublisher
+        // picks this up later on its own schedule and is the only thing that actually talks to Kafka
+        outboxEventPublisher.enqueue(
+                AggregateType.PAYMENT,
+                payment.getId(),
+                "PAYMENT_INITIATED",
+                Map.of(
+                        "paymentId", payment.getId().toString(),
+                        "orderId", order.getId().toString(),
+                        "merchantId", merchantId.toString(),
+                        "status", payment.getStatus(),
+                        "method", payment.getMethod()
+                )
+        );
 
         return paymentConverter.toPojo(payment);
     }
@@ -147,6 +164,24 @@ public class PaymentServiceImpl implements PaymentService {
             paymentTransitionService.apply(payment, PaymentEvent.AUTHORIZE_SUCCESS, Actor.SYSTEM, "Bank callback authorized the payment");
             payment.setBankReference(bankRef);
             payment.setAuthorizedAt(LocalDateTime.now());
+            payment = paymentRepository.save(payment);
+
+            // written in the same transaction as the save above — OutboxPoller picks this up
+            // later on its own schedule and is the only thing that actually talks to Kafka
+            outboxEventPublisher.enqueue(
+                    AggregateType.PAYMENT,
+                    payment.getId(),
+                    "PAYMENT_STATUS_CHANGED",
+                    Map.of(
+                            "stage", "AUTHORIZATION",
+                            "paymentId", payment.getId().toString(),
+                            "orderId", payment.getOrder().getId().toString(),
+                            "merchantId", payment.getMerchantId().toString(),
+                            "status", payment.getStatus(),
+                            "method", payment.getMethod()
+                    )
+            );
+
             captureAuthorized(payment, Actor.SYSTEM, "Auto-capture after bank authorization");
             return;
         }
@@ -154,7 +189,23 @@ public class PaymentServiceImpl implements PaymentService {
         paymentTransitionService.apply(payment, PaymentEvent.AUTHORIZE_FAIL, Actor.SYSTEM, errorDesc);
         payment.setErrorCode(errorCode);
         payment.setErrorDescription(errorDesc);
-        paymentRepository.save(payment);
+        payment = paymentRepository.save(payment);
+
+        // written in the same transaction as the save above — OutboxPoller picks this up later
+        // on its own schedule and is the only thing that actually talks to Kafka
+        outboxEventPublisher.enqueue(
+                AggregateType.PAYMENT,
+                payment.getId(),
+                "PAYMENT_STATUS_CHANGED",
+                Map.of(
+                        "stage", "AUTHORIZATION",
+                        "paymentId", payment.getId().toString(),
+                        "orderId", payment.getOrder().getId().toString(),
+                        "merchantId", payment.getMerchantId().toString(),
+                        "status", payment.getStatus(),
+                        "method", payment.getMethod()
+                )
+        );
     }
 
     private Payment captureAuthorized(Payment payment, Actor requestedBy, String reason) {
@@ -194,6 +245,22 @@ public class PaymentServiceImpl implements PaymentService {
             OrderRecord order = payment.getOrder();
             order.setStatus(OrderStatus.PAID);
             orderRepository.save(order);
+
+            // written in the same transaction as the payment/order save above — OutboxEventPublisher
+            // picks this up later on its own schedule and is the only thing that actually talks to Kafka
+            outboxEventPublisher.enqueue(
+                    AggregateType.PAYMENT,
+                    payment.getId(),
+                    "PAYMENT_STATUS_CHANGED",
+                    Map.of(
+                            "stage", "CAPTURE",
+                            "paymentId", payment.getId().toString(),
+                            "orderId", order.getId().toString(),
+                            "merchantId", payment.getMerchantId().toString(),
+                            "status", payment.getStatus(),
+                            "method", payment.getMethod()
+                    )
+            );
         }
 
         return payment;
