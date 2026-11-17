@@ -4,6 +4,7 @@ import com.garv.gopay.common.entities.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.util.Arrays;
 import java.util.UUID;
 
 @Entity
@@ -35,7 +36,17 @@ public class MerchantWebhookConfig extends BaseEntity {
     @Builder.Default
     private boolean enabled = true;
 
-    @Column(nullable = false, length = 255)
-    private String webhookSecretHash;
+    @Column(nullable = false)
+    private byte[] encryptedSecret;
+
+    @Column(nullable = false)
+    private byte[] encryptedDek;
+
+    public boolean isSubscribed(String eventType) {
+        if (eventTypeFilter == null || eventTypeFilter.isBlank()) {
+            return true;
+        }
+        return Arrays.asList(eventTypeFilter.split(",")).contains(eventType);
+    }
 
 }

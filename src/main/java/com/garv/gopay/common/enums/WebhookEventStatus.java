@@ -4,6 +4,7 @@ public enum WebhookEventStatus {
     PENDING,
     DELIVERED,
     FAILED,
-    DEAD
+    DEAD,
+    DEAD_LETTERED
     ;
 }

@@ -50,6 +50,11 @@ Create Order — POST /v1/orders
     "amount": 50000,
     "currency": "INR"
   },
+  "customer": {
+    "name": "Garv Arora",
+    "email": "garv@example.com",
+    "phone": "9876543210"
+  },
   "receipt": "order_rcpt_12345",
   "notes": {
     "customer_name": "Garv Arora",
@@ -96,6 +101,7 @@ Tokenize Card — POST /v1/vault/tokenize
   "expiryYear": 2029,
   "customerId": "<customer-uuid>"
 }
+(customerId is optional — omit it to tokenize a card without a customer; the order response returns the customerId created from the order's customer details)
 
 --- Demo: deterministic outcomes (no reliance on random simulation) ---
 

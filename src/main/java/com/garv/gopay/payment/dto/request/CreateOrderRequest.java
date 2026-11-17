@@ -1,6 +1,7 @@
 package com.garv.gopay.payment.dto.request;
 
 import com.garv.gopay.common.Money;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
@@ -10,6 +11,10 @@ import java.util.Map;
 public record CreateOrderRequest(
         @NotNull(message = "Amount is required")
         Money amount,
+
+        @NotNull(message = "Customer details are required")
+        @Valid
+        CustomerDetails customer,
 
         @Size(max = 100, message = "Receipt must have at most 100 characters")
         String receipt, ///  order-id known to merchant

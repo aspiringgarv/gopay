@@ -26,11 +26,15 @@ design doc are both hosted here, no login required:
   refresh token); a merchant's server calls the payment API with an API key id and secret.
 - **Auditing** — every entity records `createdAt`/`updatedAt` and `createdBy`/`updatedBy`
   automatically, the latter resolved from whoever authenticated the request.
+- **Webhooks** — every order/payment domain event gets fanned out (via Kafka) into a signed
+  (HMAC-SHA256) delivery per registered, matching merchant config. Delivery runs off a Redis-ZSET
+  retry queue with exponential backoff, and anything that exhausts its retries lands in a
+  dead-letter table instead of disappearing.
 
 ## Stack
 
-Java 25 · Spring Boot 4.1 · Spring Security · Spring Data JPA (Hibernate) · PostgreSQL ·
-MapStruct · Lombok · JJWT
+Java 25 · Spring Boot 4.1 · Spring Security · Spring Data JPA (Hibernate) · PostgreSQL · Redis ·
+Kafka · MapStruct · Lombok · JJWT
 
 ## Running it
 
@@ -99,9 +103,9 @@ common/      shared entities (BaseEntity), enums, exceptions, validation, auditi
 merchant/    merchant signup/login, API keys, JWT + API-key auth, MerchantContext
 payment/     orders, payments, gateway/processor routing, state machine, bank callback simulator
 vault/       card tokenization, envelope encryption
-operations/  settlement, webhooks, DLQ (domain models only — not wired up yet)
+operations/  webhook config fan-out, signing, Redis retry queue, delivery, DLQ; settlement (not wired up yet)
 ```
 
 ## Coming later
 
-Refunds, settlement, and webhooks — in whatever order the build goes.
+Refunds and settlement — in whatever order the build goes.
