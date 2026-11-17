@@ -18,7 +18,8 @@ Redis · Kafka · MapStruct · Lombok · JJWT
 common/        shared entities (BaseEntity), enums, exceptions, validation, auditing,
                rate limiting, caching, idempotency — all generic, domain-agnostic infrastructure
 merchant/      merchant signup/login, API keys, JWT + API-key auth filters, MerchantContext
-payment/       orders, payments, gateway/processor routing, state machine, bank callback simulator
+payment/       orders, payments, gateway/processor routing, state machine, bank callback simulator,
+               transactional outbox (Kafka)
 vault/         card tokenization, envelope encryption
 operations/    webhook config fan-out, HMAC signing, Redis retry queue, delivery, DLQ; settlement
                — domain models only, not wired up yet
@@ -403,6 +404,95 @@ serving the wrong record's data — not yet implemented here.
 
 ---
 
+## Kafka: transactional outbox
+
+Order and payment lifecycle events need to reach Kafka, but a service method that calls Kafka
+directly has a real failure mode: the DB commit can succeed while the Kafka send fails (or vice
+versa), leaving downstream consumers with either a missing event or one that describes a write
+that never actually happened. The **transactional outbox** pattern closes that gap by splitting
+"record that this happened" from "tell Kafka about it" into two steps that never have to succeed
+together.
+
+### The table: `OutboxEvent`
+
+| Column | Purpose |
+|---|---|
+| `aggregateType` | `PAYMENT` / `ORDER` — which domain object this event is about |
+| `aggregateId` | that object's id |
+| `eventType` | e.g. `ORDER_CREATED`, `PAYMENT_INITIATED`, `PAYMENT_STATUS_CHANGED` |
+| `payload` | `jsonb` — the actual event data |
+| `status` | `PENDING` → `PUBLISHED`, or `FAILED` after too many retries |
+| `retryCount`, `errorMessage`, `publishedAt` | bookkeeping for the send side |
+
+There is deliberately no `topic` column — see below.
+
+### Write side: `OutboxEventPublisher.enqueue(...)`
+
+Called from inside the *same* `@Transactional` service method as the business write, right next to
+the `save()` it's describing — e.g. `OrderServiceImpl.create()` saves the order, then enqueues
+`ORDER_CREATED`; `PaymentServiceImpl.initiate()` saves the payment, then enqueues
+`PAYMENT_INITIATED`. Because both writes are in one transaction, the event row can only exist if
+the business write actually committed — a rollback takes the outbox row down with it, so there's no
+way to end up with an event for something that never happened.
+
+| Call site | Event | Notes |
+|---|---|---|
+| `OrderServiceImpl.create()` | `ORDER_CREATED` | — |
+| `PaymentServiceImpl.initiate()` | `PAYMENT_INITIATED` | — |
+| `PaymentServiceImpl.resolveAuthorization()` (both branches) | `PAYMENT_STATUS_CHANGED` | payload carries `"stage": "AUTHORIZATION"` |
+| `PaymentServiceImpl.captureAuthorized()`, on `CAPTURED` only | `PAYMENT_STATUS_CHANGED` | payload carries `"stage": "CAPTURE"` |
+
+A successful bank callback (`resolveAuthorization` approving, then auto-capturing) produces *two*
+events in one transaction — `AUTHORIZATION` then `CAPTURE` — matching the actual two-step state
+transition, not one event papering over both.
+
+### Read + send side: `OutboxPoller` → `OutboxEventPublisher.publish()`
+
+`OutboxPoller` is a separate `@Scheduled` job (`outbox.publisher.polling-interval-ms`, default 5s)
+that does nothing but fetch a batch — `findFirst500ByStatusOrderByCreatedAtAsc(PENDING)`, oldest
+first, capped at 500 so one poll can't try to load the entire backlog — and hand each row to
+`OutboxEventPublisher.publish()`, which is the only thing in the codebase that actually talks to
+Kafka.
+
+`publish()` builds the Kafka message as an envelope, not the raw payload:
+
+```json
+{ "eventType": "...", "aggregateType": "...", "aggregateId": "...", "payload": { ... } }
+```
+
+Two choices worth calling out:
+- **Topic resolution.** The topic isn't stored on the row — `KafkaProperties` (a
+  `@ConfigurationProperties(prefix = "kafka")` map, `kafka.topics.payment` /
+  `kafka.topics.order` in `application.yaml`) resolves it from `aggregateType` at publish time.
+  Renaming a topic is a yaml edit, not a data migration, and a row enqueued before a rename still
+  publishes to the *current* topic.
+- **Partition key.** The producer key is the **merchant id**, pulled out of the inner `payload` —
+  not the aggregate id. Every event for one merchant lands on the same partition, so a consumer
+  sees `ORDER_CREATED` → `PAYMENT_INITIATED` → `PAYMENT_STATUS_CHANGED(AUTHORIZATION)` →
+  `PAYMENT_STATUS_CHANGED(CAPTURE)` in produce order, instead of each event landing on a random
+  partition and arriving out of sequence.
+
+The send itself is `kafkaTemplate.send(...).get(5, TimeUnit.SECONDS)` — deliberately blocking, with
+a timeout, so the poller finds out synchronously whether the write actually reached Kafka before
+deciding how to update the row, but can't hang forever if the broker is unreachable.
+
+### Status updates live in their own bean
+
+`OutboxEventStatusHandler.markPublished()` / `markFailed()` are `@Transactional`, but on a
+*separate* `@Component` from `OutboxEventPublisher` — not a private method, and not called via
+`this.` from inside the same class. Spring's `@Transactional` only takes effect through the proxy
+Spring wraps around a bean; a same-class call bypasses that proxy entirely and the annotation
+silently does nothing. Splitting the status update into its own bean is what makes the annotation
+real.
+
+`markFailed()` also enforces a **dead-letter cutoff**: `retryCount` increments on every failure,
+and once it reaches `outbox.publisher.max-attempts` (default 5) the row moves to the terminal
+`FAILED` status instead of staying `PENDING` forever. `OutboxPoller` only ever queries for
+`PENDING`, so a permanently-broken payload stops being retried instead of looping indefinitely —
+though there's no DLQ topic or alerting on a `FAILED` row yet, so it currently just sits there.
+
+---
+
 ## Webhooks: fan-out, signing, retry, DLQ
 
 A merchant registers a target URL and gets back a one-time secret (`MerchantWebhookConfig`) — the
@@ -412,21 +502,6 @@ through the transactional outbox gets a second life: a Kafka consumer fans it ou
 `WebhookEvent` row per matching, enabled config, and a chain of schedulers carries each row from
 `PENDING` through delivery, exponential-backoff retry, and — if the target never answers — a
 dead-letter record a human can inspect later.
-
-### Where the event comes from: the transactional outbox
-Nothing calls Kafka directly from inside a service method. A business write (e.g.
-`OrderServiceImpl.create()`) also inserts an `OutboxEvent` row — aggregate type, aggregate id,
-event type, payload — in the exact same database transaction as the real save. `OutboxPoller`
-(its own timer) later fetches `PENDING` rows and hands each to `OutboxEventPublisher`, which is
-the only thing in the codebase that actually talks to Kafka: it sends the event to the
-`payment-events` or `order-events` topic (keyed by `merchantId`), then
-`OutboxEventStatusHandler` marks it `PUBLISHED` — or, on failure, bumps `retryCount` and leaves it
-`PENDING` for the next poll, moving to `FAILED` only past `outbox.publisher.max-attempts`. This is
-what makes "the write succeeded but the event never got published" impossible: the event's
-existence is committed atomically with the business data, and Kafka only ever sees it afterward,
-as a separate step that can safely retry on its own. `WebhookKafkaConsumer` is currently the
-**only** consumer of either topic — the outbox pattern predates webhooks and exists purely for
-transactional safety, not because anything originally needed Kafka for fan-out.
 
 <figure role="img" aria-label="An outbox event reaches a Kafka topic, consumed by WebhookKafkaConsumer, which queries MerchantWebhookApi for active configs matching the event type, signs the payload per match, and saves a WebhookEvent row in PENDING. From there WebhookEventPoller feeds a Redis sorted-set retry queue, which WebhookDeliveryPoller drains into a virtual-thread executor that calls the merchant's URL. A 2xx response marks the event Delivered. A non-2xx or exception loops back to the retry queue with exponential backoff while attempts remain, or marks the event Dead once attempts are exhausted, which WebhookDlqPoller later moves to Dead Lettered with a durable dlq record.">
 <svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg">
@@ -530,6 +605,7 @@ inspect.
 
 ---
 
+
 ## Concurrency control
 
 Two distinct mechanisms, used for two distinct kinds of race:
@@ -562,5 +638,5 @@ race-free: nothing stops another request's command from landing in between two o
 
 Refunds and settlement — the `operations` module has domain models for these but nothing wired up
 yet. There's also no REST controller for registering a webhook config (service layer only, on
-purpose — see Webhooks above). The idempotency request-fingerprint check described above is the
-most concrete known gap in what's already built.
+purpose — see Webhooks above). The idempotency request-fingerprint check and the outbox's missing
+dead-letter handling (described above) are the most concrete known gaps in what's already built.
