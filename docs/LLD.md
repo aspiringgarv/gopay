@@ -21,7 +21,8 @@ merchant/      merchant signup/login, API keys, JWT + API-key auth filters, Merc
 payment/       orders, payments, gateway/processor routing, state machine, bank callback simulator,
                transactional outbox (Kafka)
 vault/         card tokenization, envelope encryption
-operations/    settlement, webhooks, DLQ — domain models only, not wired up yet
+operations/    webhook config fan-out, HMAC signing, Redis retry queue, delivery, DLQ; settlement
+               — domain models only, not wired up yet
 ```
 
 Each top-level package follows the same internal shape: `controllers/ → services/ (+ impl/) →
@@ -492,6 +493,119 @@ though there's no DLQ topic or alerting on a `FAILED` row yet, so it currently j
 
 ---
 
+## Webhooks: fan-out, signing, retry, DLQ
+
+A merchant registers a target URL and gets back a one-time secret (`MerchantWebhookConfig`) — the
+secret is envelope-encrypted exactly like a vaulted card (above): a per-config DEK encrypts it,
+one master key encrypts the DEK. From there, every order/payment domain event that already flows
+through the transactional outbox gets a second life: a Kafka consumer fans it out into one
+`WebhookEvent` row per matching, enabled config, and a chain of schedulers carries each row from
+`PENDING` through delivery, exponential-backoff retry, and — if the target never answers — a
+dead-letter record a human can inspect later.
+
+<figure role="img" aria-label="An outbox event reaches a Kafka topic, consumed by WebhookKafkaConsumer, which queries MerchantWebhookApi for active configs matching the event type, signs the payload per match, and saves a WebhookEvent row in PENDING. From there WebhookEventPoller feeds a Redis sorted-set retry queue, which WebhookDeliveryPoller drains into a virtual-thread executor that calls the merchant's URL. A 2xx response marks the event Delivered. A non-2xx or exception loops back to the retry queue with exponential backoff while attempts remain, or marks the event Dead once attempts are exhausted, which WebhookDlqPoller later moves to Dead Lettered with a durable dlq record.">
+<svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<marker id="arrow-wh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+<marker id="arrow-wh-danger" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--danger)"/></marker>
+</defs>
+<rect x="10" y="20" width="140" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="80" y="40" text-anchor="middle" font-size="11" fill="currentColor">Outbox event</text>
+<text x="80" y="56" text-anchor="middle" font-size="9.5" fill="var(--ink-muted)">payment/order-events</text>
+<rect x="200" y="20" width="160" height="50" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="280" y="40" text-anchor="middle" font-size="11" fill="currentColor">WebhookKafkaConsumer</text>
+<text x="280" y="56" text-anchor="middle" font-size="9.5" fill="var(--ink-muted)">match + HMAC-sign per config</text>
+<rect x="410" y="20" width="150" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="485" y="40" text-anchor="middle" font-size="11" fill="currentColor">WebhookEvent</text>
+<text x="485" y="56" text-anchor="middle" font-size="9.5" fill="var(--ink-muted)">PENDING</text>
+<line x1="150" y1="45" x2="200" y2="45" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-wh)"/>
+<line x1="360" y1="45" x2="410" y2="45" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-wh)"/>
+
+<rect x="10" y="120" width="150" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="85" y="140" text-anchor="middle" font-size="11" fill="currentColor">WebhookEventPoller</text>
+<text x="85" y="156" text-anchor="middle" font-size="9.5" fill="var(--ink-muted)">PENDING → queue, 20s</text>
+<rect x="200" y="120" width="150" height="50" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+<text x="275" y="140" text-anchor="middle" font-size="11" fill="currentColor">Redis ZSET</text>
+<text x="275" y="156" text-anchor="middle" font-size="9.5" fill="var(--ink-muted)">retry queue, ZADD NX</text>
+<rect x="390" y="120" width="160" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="470" y="140" text-anchor="middle" font-size="11" fill="currentColor">WebhookDeliveryPoller</text>
+<text x="470" y="156" text-anchor="middle" font-size="9.5" fill="var(--ink-muted)">due only → executor, 2s</text>
+<rect x="590" y="120" width="150" height="50" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="665" y="140" text-anchor="middle" font-size="11" fill="currentColor">Merchant's URL</text>
+<text x="665" y="156" text-anchor="middle" font-size="9.5" fill="var(--ink-muted)">one virtual thread each</text>
+<line x1="485" y1="70" x2="85" y2="117" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-wh)"/>
+<line x1="160" y1="145" x2="200" y2="145" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-wh)"/>
+<line x1="350" y1="145" x2="390" y2="145" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-wh)"/>
+<line x1="550" y1="145" x2="590" y2="145" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-wh)"/>
+
+<rect x="450" y="210" width="130" height="46" rx="8" fill="var(--success-soft)" stroke="var(--success)"/>
+<text x="515" y="238" text-anchor="middle" font-size="11" fill="currentColor">DELIVERED</text>
+<rect x="600" y="210" width="130" height="46" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+<text x="665" y="238" text-anchor="middle" font-size="11" fill="currentColor">DEAD</text>
+<line x1="645" y1="170" x2="525" y2="207" stroke="var(--success)" stroke-width="1.2" marker-end="url(#arrow-wh)"/>
+<line x1="665" y1="170" x2="665" y2="207" stroke="var(--danger)" stroke-width="1.5" marker-end="url(#arrow-wh-danger)"/>
+<text x="500" y="200" font-size="9" fill="var(--success)">2xx</text>
+<text x="672" y="195" font-size="9" fill="var(--danger)">attempts ≥ max</text>
+<path d="M600,233 C380,233 380,145 350,145" fill="none" stroke="var(--accent)" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrow-wh)"/>
+<text x="390" y="200" font-size="9" fill="var(--accent)">attempts &lt; max: backoff 30·2^(n−1)s, re-enqueue</text>
+
+<rect x="450" y="300" width="150" height="46" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+<text x="525" y="328" text-anchor="middle" font-size="11" fill="currentColor">WebhookDlqPoller</text>
+<rect x="620" y="300" width="140" height="46" rx="8" fill="var(--line)" stroke="currentColor"/>
+<text x="690" y="323" text-anchor="middle" font-size="10.5" fill="currentColor">DEAD_LETTERED</text>
+<text x="690" y="337" text-anchor="middle" font-size="9" fill="var(--ink-muted)">+ webhook_dlq_record</text>
+<line x1="665" y1="256" x2="665" y2="280" stroke="var(--danger)" stroke-width="1.2"/>
+<line x1="665" y1="280" x2="525" y2="297" stroke="var(--danger)" stroke-width="1.2" marker-end="url(#arrow-wh-danger)"/>
+<line x1="600" y1="323" x2="620" y2="323" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow-wh)"/>
+<text x="545" y="290" font-size="9" fill="var(--danger)">picked up every 30s</text>
+</svg>
+<figcaption>Fan-out (top row) feeds PENDING events into the retry pipeline (middle row); a failed delivery loops back into the same Redis ZSET with exponential backoff until it either succeeds or exhausts its attempts and gets dead-lettered (bottom row).</figcaption>
+</figure>
+
+### Interface segregation at the module boundary
+`WebhookKafkaConsumer` (in `operations`) depends on exactly one method:
+`MerchantWebhookApi.getActiveByEventType(merchantId, eventType)` — a plain interface, no Spring
+annotations, that `WebhookConfigService` (in `merchant`) extends. It never touches
+`WebhookConfigRepository` or any `merchant` entity directly. That seam is deliberate: if webhooks
+ever split into their own microservice, this interface is exactly the line an HTTP call would
+replace, and nothing else in `operations` has to change. There is currently no REST controller for
+managing `MerchantWebhookConfig` rows — the service layer is complete and callable, a controller
+can be added later without touching anything downstream of it.
+
+### Signing
+Each delivery is signed with HMAC-SHA256 over a canonical JSON envelope (`SignatureData` →
+`SignatureJson`, fixed top-level field order, payload keys sorted) so the same logical payload
+always produces the same signature regardless of map iteration order. The signature travels as
+`X-Webhook-Signature`; the secret it's keyed on is only ever decrypted for the one call that needs
+it.
+
+### Retry queue: a single Redis ZSET, not a Set-plus-List
+`WebhookRetryQueue` uses one sorted set, scored by due time (epoch millis, UTC). Enqueuing uses
+`ZADD NX` (`opsForZSet().addIfAbsent`) rather than a plain `ZADD` — plain `ZADD` would silently
+*overwrite* an already-queued id's score instead of leaving it alone, which breaks the one
+invariant the queue depends on. `NX` gets dedup and ordering out of one structure instead of a
+separate Set for "is this already queued" and a List for "in what order." A failed delivery is
+re-enqueued directly by the executor with a backed-off score (`30 · 2^(attempts−1)` seconds)
+instead of waiting for `WebhookEventPoller`'s next sweep to notice it's `PENDING` again.
+
+### Delivery: one virtual thread per attempt
+`WebhookDeliveryPoller` only pops due ids and removes them from the ZSET immediately — before
+delivery even starts — so a slow attempt can never be handed out twice. The actual HTTP call runs
+on its own virtual thread (`WebhookVirtualDeliveryExecutor`), via a `RestClient` with explicit 5s
+connect / 10s read timeouts, so one hanging merchant endpoint can't stall every other delivery
+queued up behind it.
+
+### Dead-letter queue
+Past `webhook.delivery.max-attempts` (default 5), an event is marked `DEAD` instead of retried
+again. `WebhookDlqPoller` picks up `DEAD` rows every 30s and `WebhookDlqPublisher` writes the full
+context — merchant, event type, target URL, attempts, last response code — into
+`webhook_dlq_record`, a plain durable table (no Kafka involved), then marks the original event
+`DEAD_LETTERED`. Nothing currently replays a DLQ'd event automatically; it's there for a human to
+inspect.
+
+---
+
+
 ## Concurrency control
 
 Two distinct mechanisms, used for two distinct kinds of race:
@@ -522,6 +636,7 @@ race-free: nothing stops another request's command from landing in between two o
 
 ## Coming later
 
-Refunds, settlement, webhooks — the `operations` module has domain models for these but nothing
-wired up yet. The idempotency request-fingerprint check and the outbox's missing dead-letter
-handling (described above) are the most concrete known gaps in what's already built.
+Refunds and settlement — the `operations` module has domain models for these but nothing wired up
+yet. There's also no REST controller for registering a webhook config (service layer only, on
+purpose — see Webhooks above). The idempotency request-fingerprint check and the outbox's missing
+dead-letter handling (described above) are the most concrete known gaps in what's already built.
