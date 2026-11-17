@@ -30,7 +30,6 @@ public record TokenizeCardRequest(
         @NotPastYear(message = "Expiry year cannot be in the past")
         Integer expiryYear,
 
-        @NotNull(message = "Customer id is required")
         UUID customerId
 ) {
 }
