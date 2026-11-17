@@ -316,11 +316,11 @@
     <a href="#state-machine">Payment state machine</a>
     <a href="#auth">Authentication</a>
     <a href="#redis">Redis: cache, rate limit &amp; idempotency</a>
+    <a href="#webhooks">Webhook delivery pipeline</a>
     <a href="#demo">Demo scenarios</a>
     <div class="toc-group">Coming later</div>
     <a href="#overview" style="opacity:.45">Refunds</a>
     <a href="#overview" style="opacity:.45">Settlement</a>
-    <a href="#overview" style="opacity:.45">Webhooks</a>
   </nav>
 
   <main>
@@ -330,8 +330,9 @@
       <p class="lede">
         How an order becomes money moving: who is allowed to call the API, the request path from
         <code>OrderController</code> down through payment routing and card vaulting, the simulated
-        bank that answers later, and the state machine that keeps every payment's status honest.
-        This page is updated in place as new pieces of gopay get built.
+        bank that answers later, the state machine that keeps every payment's status honest, and
+        the webhook pipeline that notifies a merchant's own server when any of it happens. This
+        page is updated in place as new pieces of gopay get built.
       </p>
       <div class="coverage">
         <span>orders</span>
@@ -344,6 +345,12 @@
         <span>Redis cache</span>
         <span>rate limiting</span>
         <span>idempotency keys</span>
+        <span>transactional outbox</span>
+        <span>Kafka</span>
+        <span>webhook fan-out</span>
+        <span>HMAC signing</span>
+        <span>Redis retry queue</span>
+        <span>dead-letter queue</span>
       </div>
       <p style="margin-top:14px;">
         <a href="lld.html" style="color:var(--accent);font-weight:600;text-decoration:none;">
@@ -1139,8 +1146,235 @@
       </div>
     </section>
 
-    <section id="demo">
+    <section id="webhooks">
       <div class="kicker">§8</div>
+      <h2>Webhook delivery pipeline</h2>
+      <p>
+        A merchant registers a target URL and gets back a one-time secret
+        (<code>MerchantWebhookConfig</code>) — the secret is envelope-encrypted exactly like a
+        vaulted card (§4): a per-config DEK encrypts it, and one master key encrypts the DEK.
+        From there, every order/payment domain event that already flows through the
+        <strong>outbox</strong> (§1–§3) gets a second life: a Kafka consumer fans it out into one
+        <code>WebhookEvent</code> row per matching, enabled config, and a chain of schedulers
+        carries each row from <code>PENDING</code> through delivery, exponential-backoff retry,
+        and — if the target never answers — a dead-letter record a human can inspect later.
+      </p>
+
+      <h3>Where the event comes from: the transactional outbox</h3>
+      <p>
+        Nothing in gopay calls Kafka directly from inside a service method. A business write
+        (e.g. <code>OrderServiceImpl.create()</code>) also inserts an <code>OutboxEvent</code> row
+        — aggregate type, aggregate id, event type, payload — in the exact same database
+        transaction as the real save. <code>OutboxPoller</code> (its own timer) later fetches
+        <code>PENDING</code> rows and hands each to <code>OutboxEventPublisher</code>, which is
+        the only thing in the codebase that actually talks to Kafka: it sends the event to the
+        <code>payment-events</code> or <code>order-events</code> topic (keyed by
+        <code>merchantId</code>), then <code>OutboxEventStatusHandler</code> marks it
+        <code>PUBLISHED</code> — or, on failure, bumps <code>retryCount</code> and leaves it
+        <code>PENDING</code> for the next poll, moving to <code>FAILED</code> only past
+        <code>outbox.publisher.max-attempts</code>. This is what makes "the write succeeded but
+        the event never got published" impossible: the event's existence is committed atomically
+        with the business data, and Kafka only ever sees it afterward, as a separate step that can
+        safely retry on its own.
+      </p>
+      <div class="callout">
+        <div class="dot"></div>
+        <p><code class="font-mono">WebhookKafkaConsumer</code> is currently the <strong>only</strong> consumer of these two topics — the outbox pattern itself predates webhooks and exists purely for transactional safety, not because anything originally needed Kafka for fan-out. Webhooks are what turned that existing "events reliably reach Kafka" plumbing into something with an actual second reader.</p>
+      </div>
+
+      <h3>Fan-out: one domain event, many merchants</h3>
+      <p>
+        <code>WebhookKafkaConsumer</code> listens on the same <code>payment-events</code> /
+        <code>order-events</code> topics the outbox already publishes to — nothing new is
+        produced, this is a second consumer group reading the same stream. For each message it
+        asks <strong>only</strong> <code>MerchantWebhookApi.getActiveByEventType(merchantId,
+        eventType)</code> — a bare interface with that one method, not the full
+        <code>WebhookConfigService</code> and never the repository directly — for every enabled
+        config whose event-type filter matches. Each match gets its own HMAC-SHA256 signature
+        over a canonical JSON envelope and its own <code>WebhookEvent</code> row.
+      </p>
+      <figure>
+        <div class="diagram-frame">
+          <svg viewBox="0 0 800 300" role="img" aria-label="An outbox event reaches a Kafka topic, consumed by WebhookKafkaConsumer, which queries MerchantWebhookApi for active configs matching the event type, signs the payload per match, and saves a WebhookEvent row in PENDING.">
+            <defs>
+              <marker id="arrWh1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+              </marker>
+            </defs>
+            <g style="color:var(--ink-muted)">
+              <rect x="10" y="26" width="140" height="52" rx="8" fill="none" stroke="currentColor"/>
+              <rect x="190" y="26" width="150" height="52" rx="8" fill="none" stroke="currentColor"/>
+              <rect x="380" y="26" width="150" height="52" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+              <rect x="590" y="26" width="170" height="52" rx="8" fill="var(--success-soft)" stroke="var(--success)"/>
+              <rect x="380" y="190" width="150" height="52" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+
+              <line x1="150" y1="52" x2="187" y2="52" stroke="currentColor" marker-end="url(#arrWh1)"/>
+              <line x1="340" y1="52" x2="377" y2="52" stroke="currentColor" marker-end="url(#arrWh1)"/>
+              <line x1="530" y1="44" x2="587" y2="44" stroke="currentColor" marker-end="url(#arrWh1)"/>
+              <line x1="455" y1="78" x2="455" y2="187" stroke="var(--warn)" marker-end="url(#arrWh1)"/>
+              <path d="M530,216 L675,216 L675,60" fill="none" stroke="var(--warn)" marker-end="url(#arrWh1)"/>
+            </g>
+
+            <text x="80" y="48" text-anchor="middle" class="node-label">Outbox</text>
+            <text x="80" y="64" text-anchor="middle" class="edge-label">Event</text>
+
+            <text x="265" y="48" text-anchor="middle" class="node-label">Kafka topic</text>
+            <text x="265" y="64" text-anchor="middle" class="edge-label">payment / order-events</text>
+
+            <text x="455" y="48" text-anchor="middle" class="node-label" style="fill:var(--accent)">WebhookKafka</text>
+            <text x="455" y="64" text-anchor="middle" class="edge-label" style="fill:var(--accent)">Consumer</text>
+
+            <text x="675" y="48" text-anchor="middle" class="node-label" style="fill:var(--success)">WebhookEvent</text>
+            <text x="675" y="64" text-anchor="middle" class="edge-label" style="fill:var(--success)">PENDING, per match</text>
+
+            <text x="455" y="212" text-anchor="middle" class="node-label" style="fill:var(--warn)">MerchantWebhookApi</text>
+            <text x="455" y="228" text-anchor="middle" class="edge-label" style="fill:var(--warn)">.getActiveByEventType()</text>
+
+            <text x="168" y="20" text-anchor="middle" class="edge-label">published</text>
+            <text x="358" y="20" text-anchor="middle" class="edge-label">consumed, key = merchantId</text>
+            <text x="558" y="20" text-anchor="middle" class="edge-label">sign (HMAC-SHA256) + save</text>
+            <text x="470" y="140" text-anchor="start" class="edge-label" style="fill:var(--warn)">lookup configs</text>
+            <text x="560" y="206" text-anchor="middle" class="edge-label" style="fill:var(--warn)">List&lt;WebhookConfigResponse&gt;</text>
+          </svg>
+        </div>
+        <figcaption>Fig. 7 — <code class="font-mono">WebhookKafkaConsumer.onMessage()</code>. A per-config failure (e.g. signing blows up) dead-letters just that one config's attempt instead of losing the whole batch — see the DLQ branch below. Manual ack (<code class="font-mono">spring.kafka.listener.ack-mode: manual</code>) always fires in a <code class="font-mono">finally</code>, success or not.</figcaption>
+      </figure>
+      <div class="callout">
+        <div class="dot"></div>
+        <p><code class="font-mono">MerchantWebhookApi</code> is a deliberately narrow, plain interface — no Spring annotations, one method. <code class="font-mono">WebhookConfigService extends</code> it, so the <code class="font-mono">merchant</code> module's real implementation satisfies both call sites with one method body. The point is the seam: <code class="font-mono">operations</code> (where the consumer lives) never reaches into <code class="font-mono">merchant</code>'s repository or entities, only this one contract — so if webhooks ever become their own microservice, this interface is exactly the line an HTTP call would replace, and nothing else in <code class="font-mono">operations</code> has to change.</p>
+      </div>
+
+      <h3>Delivery, retry backoff, and the dead-letter queue</h3>
+      <p>
+        Three independent schedulers carry a <code>WebhookEvent</code> the rest of the way, handed
+        off through Redis rather than calling each other directly — the same poll/publish split
+        the outbox itself uses. <code>WebhookEventPoller</code> (20 s) moves <code>PENDING</code>
+        rows into a Redis <strong>ZSET</strong> scored by when they're due.
+        <code>WebhookDeliveryPoller</code> (2 s) pops whatever's due — removed from the ZSET the
+        moment it's read, so a slow delivery can never be handed out twice — and hands each id to
+        <code>WebhookVirtualDeliveryExecutor</code>, which runs the actual HTTP call on its own
+        virtual thread so one hanging merchant endpoint can't stall the rest of the batch behind
+        it.
+      </p>
+      <figure>
+        <div class="diagram-frame">
+          <svg viewBox="0 0 1040 340" role="img" aria-label="WebhookEventPoller feeds a Redis sorted-set retry queue, which WebhookDeliveryPoller drains into a virtual-thread executor that calls the merchant's URL. A 2xx response marks the event Delivered. A non-2xx or exception loops back to the retry queue with exponential backoff while attempts remain, or marks the event Dead once attempts are exhausted, which WebhookDlqPoller later moves to Dead Lettered with a durable dlq record.">
+            <defs>
+              <marker id="arrWh2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+              </marker>
+            </defs>
+            <g style="color:var(--ink-muted)">
+              <rect x="10" y="60" width="140" height="50" rx="8" fill="none" stroke="currentColor"/>
+              <rect x="190" y="60" width="140" height="50" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+              <rect x="370" y="60" width="150" height="50" rx="8" fill="none" stroke="currentColor"/>
+              <rect x="560" y="60" width="160" height="50" rx="8" fill="var(--accent-soft)" stroke="var(--accent)"/>
+              <rect x="760" y="60" width="150" height="50" rx="8" fill="var(--warn-soft)" stroke="var(--warn)"/>
+
+              <rect x="700" y="170" width="140" height="44" rx="8" fill="var(--success-soft)" stroke="var(--success)"/>
+              <rect x="860" y="170" width="140" height="44" rx="8" fill="var(--danger-soft)" stroke="var(--danger)"/>
+
+              <rect x="700" y="260" width="150" height="44" rx="8" fill="none" stroke="currentColor"/>
+              <rect x="870" y="260" width="150" height="44" rx="8" fill="var(--line)" stroke="currentColor"/>
+
+              <line x1="150" y1="85" x2="187" y2="85" stroke="currentColor" marker-end="url(#arrWh2)"/>
+              <line x1="330" y1="85" x2="367" y2="85" stroke="currentColor" marker-end="url(#arrWh2)"/>
+              <line x1="520" y1="85" x2="557" y2="85" stroke="currentColor" marker-end="url(#arrWh2)"/>
+              <line x1="720" y1="85" x2="757" y2="85" stroke="currentColor" marker-end="url(#arrWh2)"/>
+
+              <line x1="800" y1="110" x2="770" y2="167" stroke="var(--success)" marker-end="url(#arrWh2)"/>
+              <line x1="870" y1="110" x2="925" y2="167" stroke="var(--danger)" marker-end="url(#arrWh2)"/>
+
+              <path d="M835,60 L835,18 L260,18 L260,57" fill="none" stroke="var(--accent)" marker-end="url(#arrWh2)"/>
+
+              <path d="M930,214 L930,236 L775,236 L775,257" fill="none" stroke="var(--danger)" marker-end="url(#arrWh2)"/>
+              <line x1="850" y1="282" x2="867" y2="282" stroke="currentColor" marker-end="url(#arrWh2)"/>
+            </g>
+
+            <text x="80" y="82" text-anchor="middle" class="node-label">WebhookEvent</text>
+            <text x="80" y="98" text-anchor="middle" class="edge-label">Poller · 20s</text>
+
+            <text x="260" y="82" text-anchor="middle" class="node-label" style="fill:var(--accent)">Redis ZSET</text>
+            <text x="260" y="98" text-anchor="middle" class="edge-label" style="fill:var(--accent)">retry queue</text>
+
+            <text x="445" y="82" text-anchor="middle" class="node-label">WebhookDelivery</text>
+            <text x="445" y="98" text-anchor="middle" class="edge-label">Poller · 2s</text>
+
+            <text x="640" y="82" text-anchor="middle" class="node-label" style="fill:var(--accent)">Virtual thread</text>
+            <text x="640" y="98" text-anchor="middle" class="edge-label" style="fill:var(--accent)">per delivery</text>
+
+            <text x="835" y="82" text-anchor="middle" class="node-label" style="fill:var(--warn)">Merchant's</text>
+            <text x="835" y="98" text-anchor="middle" class="edge-label" style="fill:var(--warn)">target URL</text>
+
+            <text x="770" y="192" text-anchor="middle" class="node-label" style="fill:var(--success)">DELIVERED</text>
+            <text x="930" y="192" text-anchor="middle" class="node-label" style="fill:var(--danger)">DEAD</text>
+
+            <text x="775" y="282" text-anchor="middle" class="node-label">WebhookDlq</text>
+            <text x="775" y="296" text-anchor="middle" class="edge-label">Poller · 30s</text>
+            <text x="945" y="282" text-anchor="middle" class="node-label">DEAD_LETTERED</text>
+            <text x="945" y="296" text-anchor="middle" class="edge-label">+ webhook_dlq_record</text>
+
+            <text x="545" y="12" text-anchor="middle" class="edge-label" style="fill:var(--accent)">non-2xx / exception, attempts &lt; max: backoff 30·2^(n−1)s, re-enqueue</text>
+            <text x="815" y="140" text-anchor="end" class="edge-label" style="fill:var(--success)">2xx</text>
+            <text x="945" y="140" text-anchor="middle" class="edge-label" style="fill:var(--danger)">attempts ≥ max</text>
+            <text x="958" y="230" text-anchor="middle" class="edge-label" style="fill:var(--danger)">picked up every 30s</text>
+          </svg>
+        </div>
+        <figcaption>Fig. 8 — The retry loop closes between two separate schedulers: a failed delivery is marked <code class="font-mono">PENDING</code> again with a backed-off <code class="font-mono">nextRetryAt</code> <em>and</em> re-enqueued into the same Redis ZSET directly, so it doesn't have to wait for <code class="font-mono">WebhookEventPoller</code>'s next 20 s sweep to notice. <code class="font-mono">WebhookDlqPoller</code> runs independently and only ever reads rows already <code class="font-mono">DEAD</code>.</figcaption>
+      </figure>
+
+      <div class="tbl-wrap">
+        <table class="ref">
+          <caption>WebhookEventStatus transitions</caption>
+          <thead>
+            <tr><th>Status</th><th>Reached when</th><th>Terminal?</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="font-mono">PENDING</td><td>created by the consumer; also re-entered after a failed attempt that still has retries left</td><td>no</td></tr>
+            <tr><td class="font-mono">DELIVERED</td><td>target responded 2xx</td><td><span class="badge success">yes</span></td></tr>
+            <tr><td class="font-mono">DEAD</td><td><code class="font-mono">attempts</code> reached <code class="font-mono">webhook.delivery.max-attempts</code> (default 5)</td><td>no — picked up by the DLQ poller</td></tr>
+            <tr><td class="font-mono">DEAD_LETTERED</td><td><code class="font-mono">WebhookDlqPublisher</code> recorded it into <code class="font-mono">webhook_dlq_record</code></td><td><span class="badge danger">yes</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="tbl-wrap" style="margin-top:14px">
+        <table class="ref">
+          <caption>Pipeline components, in order of a message's travel</caption>
+          <thead>
+            <tr><th>Component</th><th>Job</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="font-mono">WebhookEncryptionConfig</td><td>AES-GCM envelope encryption for a config's secret — same shape as the vault's (§4): a per-config DEK encrypts the secret, one master key encrypts the DEK</td></tr>
+            <tr><td class="font-mono">WebhookConfigService</td><td>CRUD for <code class="font-mono">MerchantWebhookConfig</code> — internal service only, no REST controller on purpose (see callout below)</td></tr>
+            <tr><td class="font-mono">MerchantWebhookApi</td><td>the one-method contract <code class="font-mono">operations</code> is allowed to call across the module boundary</td></tr>
+            <tr><td class="font-mono">WebhookKafkaConsumer</td><td>fans one domain event out into one <code class="font-mono">WebhookEvent</code> per matching config, HMAC-signed</td></tr>
+            <tr><td class="font-mono">SignatureData / SignatureJson / WebhookSigner</td><td>canonical JSON (fixed field order, sorted payload keys) → HMAC-SHA256, Base64 — sent as <code class="font-mono">X-Webhook-Signature</code></td></tr>
+            <tr><td class="font-mono">WebhookRetryQueue</td><td>Redis ZSET wrapper — <code class="font-mono">ZADD NX</code> to enqueue (dedup without overwriting an existing score), score = due time in epoch millis</td></tr>
+            <tr><td class="font-mono">WebhookEventPoller</td><td>DB <code class="font-mono">PENDING</code> → Redis ZSET, every 20 s</td></tr>
+            <tr><td class="font-mono">WebhookDeliveryPoller</td><td>Redis ZSET (due only) → hands off to the executor, every 2 s</td></tr>
+            <tr><td class="font-mono">WebhookVirtualDeliveryExecutor</td><td>the actual HTTP POST, one virtual thread per delivery, via a <code class="font-mono">RestClient</code> with explicit 5 s/10 s connect/read timeouts</td></tr>
+            <tr><td class="font-mono">WebhookDlqPoller / WebhookDlqPublisher</td><td>DB <code class="font-mono">DEAD</code> → <code class="font-mono">webhook_dlq_record</code> (plain DB write, no Kafka) + <code class="font-mono">DEAD_LETTERED</code>, every 30 s</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <div class="dot"></div>
+        <p><code class="font-mono">ZADD</code> alone would silently <em>overwrite</em> an existing member's score — not skip it. The retry queue needs the opposite: if an id is already queued, leave it exactly where it is. <code class="font-mono">opsForZSet().addIfAbsent(...)</code> (<code class="font-mono">ZADD NX</code>) does that atomically, which is also what makes one Redis structure double as both a dedup set <em>and</em> an ordered queue — no separate Set-plus-List needed.</p>
+      </div>
+      <div class="callout">
+        <div class="dot"></div>
+        <p>There is currently no HTTP endpoint for registering a <code class="font-mono">MerchantWebhookConfig</code> — that was a deliberate call, not a gap. The service layer is complete; a controller can be added later without touching anything downstream of it, since the consumer only ever depends on <code class="font-mono">MerchantWebhookApi</code>.</p>
+      </div>
+      <div class="callout">
+        <div class="dot"></div>
+        <p>Every "now" fed into the retry queue's score has to be captured as <code class="font-mono">LocalDateTime.now(ZoneOffset.UTC)</code>, never a bare <code class="font-mono">LocalDateTime.now()</code> — the conversion to epoch millis assumes the value is already UTC. A bare <code class="font-mono">now()</code> returns the server's local wall-clock time, which gets re-labeled as UTC and silently shifts every retry by the server's own UTC offset.</p>
+      </div>
+    </section>
+
+    <section id="demo">
+      <div class="kicker">§9</div>
       <h2>Demo scenarios</h2>
       <p>
         The mock processors roll a weighted die for most charges (roughly 70% pending, 30%
@@ -1216,8 +1450,8 @@
 
     <footer class="doc-foot">
       Covers gopay as of the order → payment → vault → state-machine → bank callback → auth →
-      Redis cache, rate limiting &amp; idempotency build. Say the word and the next section lands
-      here: refunds, settlement, or webhooks, in whatever order the build goes.
+      Redis cache, rate limiting &amp; idempotency → webhook delivery pipeline build. Say the word
+      and the next section lands here: refunds or settlement, in whatever order the build goes.
     </footer>
   </main>
 </div>
