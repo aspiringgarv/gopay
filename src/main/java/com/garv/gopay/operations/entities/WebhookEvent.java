@@ -36,6 +36,9 @@ public class WebhookEvent extends BaseEntity {
     @Column(nullable = false)
     private String targetUrl;
 
+    @Column(nullable = false)
+    private String signature;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private WebhookEventStatus status;
